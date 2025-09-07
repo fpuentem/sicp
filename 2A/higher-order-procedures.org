@@ -1,6 +1,7 @@
 #+TITLE: Lecture 2A: Higher-order Procedures
 #+NAME: Fabricio Puente M.
 #+DATE: <2025-09-06 Sat>
+#+STARTUP: overview
 
 * Introduction
 ** $\sum^b_{i=a} i$
@@ -63,7 +64,7 @@ There is a common patter that emerge from all these examples.
          (<name> (<next> a) b))))
 #+END_SRC
 * Sigma Notation
-
+#+NAME: sigma-notation
 #+BEGIN_SRC elisp
   ;; This is the core function. It's a "higher-order" function because
   ;; it takes other functions as arguments (`term` and `next`).
@@ -99,4 +100,96 @@ There is a common patter that emerge from all these examples.
   ;; This will sum the integers from 1 to 10.
   ;; The result should be 55.
   (message "The sum of integers from 1 to 10 is: %s" (sum-integers 1 10))
+#+END_SRC
+
+#+RESULTS:
+: The sum of integers from 1 to 10 is: 55
+
+* Identity
+** Leibiniz series for pi/8
+#+BEGIN_SRC elisp :eval sigma-notation
+  (defun pi/8-sum (a b)
+    "Approximates Pi/8 using the Gregory-Leibniz series for terms from A to B.
+  Also, it use the generic `sum` procedure."
+    (sum (lambda (i) (/ 1.0 (* i (+ i 2))))
+         a
+         (lambda (i) (+ i 4))
+         b))
+  (pi/8-sum 1 1000)
+#+END_SRC
+
+#+RESULTS:
+: 0.39244908194872286
+
+** Iterative implementation of sum
++ This code uses an inner helper function with an accumulator variable to avoid deep recursion.
+#+BEGIN_SRC elisp
+  ;; This is the main function. It's a "higher-order" function because
+  ;; it takes a `term` function and a `next` function as arguments.
+  (defun sum (term a next b)
+    "Sum the result of TERM applied to values from A to B,
+    iterating with the NEXT function."
+    ;; We define a local, nested helper function `iter` using `defun`.
+    ;; This is the core of the iterative process.
+    (defun iter (current-a ans)
+      "Iterates to calculate the sum.
+      - `current-a`: The current value in the series.
+      - `ans`: The running total (the accumulator)."
+      ;; The base case: if the current value is greater than the end value,
+      ;; return the accumulated answer.
+      (if (> current-a b)
+          ans
+        ;; The recursive step: call `iter` again with the next value and
+        ;; a new running total.
+        (iter (funcall next current-a)
+              (+ ans (funcall term current-a)))))
+  ;; Start the iterative process by calling the helper function `iter`.
+  ;; The starting value is `a` and the initial accumulator is `0`.
+  (iter a 0))
+
+  ;; --- Example Functions for Summation ---
+
+  ;; An identity function that returns its input.
+  (defun identity-term (x)
+    "Return the same input X."
+    x)
+
+  ;; A next function that increments its input by one.
+  (defun next-int (x)
+    "Return the next integer."
+    (1+ x))
+
+  ;; --- Example Usage ---
+
+  ;; Summing the integers from 1 to 10
+  (let ((sum-of-integers (sum #'identity-term 1 #'next-int 10)))
+    (message "Sum of integers from 1 to 10: %s" sum-of-integers))
+#+END_SRC
+
+#+RESULTS:
+: Sum of integers from 1 to 10: 55
+** Fixed point
+#+BEGIN_SRC elisp
+(defun fixed-point (f start)
+  "Finds the fixed point of a function F, starting at START.
+  A fixed point x is a value for which (funcall f x) equals x."
+  (let ((tolerance 0.00001))
+    (defun close-enough? (u v)
+      "Checks if two numbers are close enough."
+      (< (abs (- u v)) tolerance))
+
+    (defun iter (old new)
+      "Iterative function to find the fixed point."
+      (if (close-enough? old new)
+          new
+        (iter new (funcall f new))))
+
+    ;; Start the iterative process
+    (iter start (funcall f start))))
+
+(defun sqrt-fixed-point (x)
+  "Calculates the square root of x using fixed-point iteration."
+  (fixed-point (lambda (y) (/ (+ y (/ x y)) 2.0)) 1.0))
+
+(sqrt-fixed-point 9.0)
 #+END_SRC
