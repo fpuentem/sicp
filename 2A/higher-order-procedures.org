@@ -1,0 +1,102 @@
+#+TITLE: Lecture 2A: Higher-order Procedures
+#+NAME: Fabricio Puente M.
+#+DATE: <2025-09-06 Sat>
+
+* Introduction
+** $\sum^b_{i=a} i$
+#+BEGIN_SRC elisp
+  (defun sum-int (a b)
+    "Return the sum of integer from A to B."
+    (if (> a b)
+        0
+      (+ a (sum-int (1+ a) b))))
+
+  (sum-int 1 10)
+#+END_SRC
+
+#+RESULTS:
+: 55
++ Divide and Conquer, the second call to ~sum-int~ is a smaller program.
+** $\sum^b_{i=a} i^2$
+#+BEGIN_SRC elisp
+  (defun square (x)
+    "Return the square of X."
+    (* x x))
+
+  (defun sum-sq (a b)
+    "Return the sum of the squares of integers between A and B."
+    (if (> a b)
+        0
+      (+ (square a)
+         (sum-sq (1+ a) b))))
+
+  (sum-sq 1 3)
+#+END_SRC
+
+#+RESULTS:
+: 14
++ Complex systems, we need to divide it in small pieces, each of them we can understand separately.
+
+** PI/8 Leibiniz formula
+#+BEGIN_SRC elisp
+  (defun pi-sum (a b)
+    "Return the aproximation of PI/8 using Leibniz formula.
+  The sum start at A and goes until B adding by 4."
+    (if (> a b)
+        0
+      (+ (/ 1.0 (* a (+ a 2)))
+         (pi-sum (+ a 4) b))))
+
+  (pi-sum 1 1000)
+#+END_SRC
+
+#+RESULTS:
+: 0.39244908194872286
+
+There is a common patter that emerge from all these examples.
+#+BEGIN_SRC elisp
+  (defun <name> (a b)
+    "Doc string A and B as inputs."
+    (if (> a b)
+        0
+      (+ (<term> a)
+         (<name> (<next> a) b))))
+#+END_SRC
+* Sigma Notation
+
+#+BEGIN_SRC elisp
+  ;; This is the core function. It's a "higher-order" function because
+  ;; it takes other functions as arguments (`term` and `next`).
+  (defun sum (term a next b)
+    "Return a sum by applying TERM to each value from A to B,
+    incrementing with the NEXT function."
+    (if (> a b)
+        0
+      ;; Use `funcall` to apply the function stored in `term` to the value `a`.
+      (+ (funcall term a)
+         ;; This is the recursive call. We use `funcall` again for `next`.
+         (sum term
+              (funcall next a)
+              next
+              b))))
+
+  ;; This is a simple identity function.
+  (defun identity (x)
+    "Return the same input X."
+    x)
+
+  ;; This is a wrapper function that sets up the sum for integers.
+  ;; It uses the `identity` function for the term and the built-in
+  ;; `1+` function for the next step.
+  (defun sum-integers (a b)
+    "Sum the integers from A to B, inclusive."
+    ;; The `#'` is a shorthand for `(function ...)` and tells Lisp
+    ;; to treat `1+` as a function to be passed to `sum`.
+    (sum #'identity a #'1+ b))
+
+  ;; Example usage:
+  ;; (sum-integers 1 10)
+  ;; This will sum the integers from 1 to 10.
+  ;; The result should be 55.
+  (message "The sum of integers from 1 to 10 is: %s" (sum-integers 1 10))
+#+END_SRC
