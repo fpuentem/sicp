@@ -170,10 +170,107 @@ There is a common patter that emerge from all these examples.
 : Sum of integers from 1 to 10: 55
 ** Fixed point
 #+BEGIN_SRC elisp
+  (defun fixed-point (f start)
+    "Finds the fixed point of a function F, starting at START.
+    A fixed point x is a value for which (funcall f x) equals x."
+    (let ((tolerance 0.00001))
+      (defun close-enough? (u v)
+        "Checks if two numbers are close enough."
+        (< (abs (- u v)) tolerance))
+
+      (defun iter (old new)
+        "Iterative function to find the fixed point."
+        (if (close-enough? old new)
+            new
+          (iter new (funcall f new))))
+
+      ;; Start the iterative process
+      (iter start (funcall f start))))
+
+  (defun sqrt-fixed-point (x)
+    "Calculates the square root of x using fixed-point iteration."
+    (fixed-point (lambda (y) (/ (+ y (/ x y)) 2.0)) 1.0))
+
+  (sqrt-fixed-point 9.0)
+#+END_SRC
+
+#+RESULTS:
+: 3.0
+** Oscillator
++ ~average-damp~ is a factory for creating new, more stable functions.
+#+BEGIN_SRC elisp
+  ;; This is the `fixed-point` procedure from before.
+  ;; It finds a value for which f(x) = x.
+  (defun fixed-point (f start)
+    "Finds the fixed point of a function F, starting at START."
+    (let ((tolerance 0.00001))
+      (defun close-enough? (u v)
+        "Checks if two numbers are close enough."
+        (< (abs (- u v)) tolerance))
+
+      (defun iter (old new)
+        "Iterative function to find the fixed point."
+        (if (close-enough? old new)
+            new
+          (iter new (funcall f new))))
+
+      (iter start (funcall f start))))
+
+  ;; A simple helper procedure to find the average of two numbers.
+  (defun average (x y)
+    "Returns the average of two numbers."
+    (/ (+ x y) 2.0))
+
+  ;; This is the `average-damp` procedure. It takes a function `f`
+  ;; and returns a new function.
+  (defun average-damp (f)
+    "Returns a new procedure that is the average of its argument and (f x)."
+    (lambda (x)
+      (average (funcall f x) x)))
+
+  ;; The main `sqrt` procedure that uses the others to find the square root.
+  (defun sqrt (x)
+    "Calculates the square root of x using fixed-point iteration."
+    (fixed-point (average-damp (lambda (y) (/ x y))) 1.0))
+
+  ;; --- Example Usage ---
+
+  ;; Calculate the square root of 9
+  (let ((my-sqrt (sqrt 9.0)))
+    (message "The square root of 9 is: %s" my-sqrt))
+
+  ;; Calculate the square root of 2
+  (let ((my-sqrt-2 (sqrt 2.0)))
+    (message "The square root of 2 is: %s" my-sqrt-2))
+#+END_SRC
+
+* Newton's Method
+To find a $y$ such that:
+$f(y) = 0$
+Start with a guess, $y_0$:
+$y_{n+1} = y_n - \frac{f(y_n)}{\frac{df}{dy}}$
++ Whishful thinking is important in engineering.
++ The rights and privileges of first-class citizens.
+  - To be named by variables.
+  - To be passed as arguments to procedures.
+  - To be returned as values of procedures.
+  - To be incorporated into data structures.
+
+#+BEGIN_SRC elisp
+ ;; ==============================================
+;; Part 1: Higher-Order Procedures
+;; These are general-purpose procedures that can be reused.
+;; ==============================================
+
+(defconst PI-EPSILON 0.0001
+  "A small value used for tolerance in calculations.")
+
+(defconst DX 0.0001
+  "A small value used for approximating derivatives.")
+
 (defun fixed-point (f start)
-  "Finds the fixed point of a function F, starting at START.
-  A fixed point x is a value for which (funcall f x) equals x."
-  (let ((tolerance 0.00001))
+  "Find the fixed point of a function F, starting at START."
+  (let ((tolerance PI-EPSILON))
     (defun close-enough? (u v)
       "Checks if two numbers are close enough."
       (< (abs (- u v)) tolerance))
@@ -184,12 +281,38 @@ There is a common patter that emerge from all these examples.
           new
         (iter new (funcall f new))))
 
-    ;; Start the iterative process
     (iter start (funcall f start))))
 
-(defun sqrt-fixed-point (x)
-  "Calculates the square root of x using fixed-point iteration."
-  (fixed-point (lambda (y) (/ (+ y (/ x y)) 2.0)) 1.0))
+(defun deriv (f)
+  "Approximates the derivative of a function F.
+Returns a new function that calculates the derivative at a point X."
+  (lambda (x)
+    (/ (- (funcall f (+ x DX)) (funcall f x)) DX)))
 
-(sqrt-fixed-point 9.0)
+(defun newton (f guess)
+  "Find the root of a function F using Newton's method, starting from GUESS.
+Returns a new procedure to find the next iteration."
+  (fixed-point (lambda (x)
+                 (- x (/ (funcall f x) (funcall (deriv f) x))))
+               guess))
+
+;; ==============================================
+;; Part 2: Newton's Method for Square Root
+;; ==============================================
+
+(defun sqr (x)
+  "Return the square of X."
+  (* x x))
+
+(defun sqrt-newton (x)
+  "Calculates the square root of a number X using Newton's method.
+This finds the root of the function f(y) = y^2 - x."
+  (newton (lambda (y) (- (sqr y) x)) 1.0))
+
+;; ==============================================
+;; Example Usage
+;; ==============================================
+
+(message "The square root of 9 is: %s" (sqrt-newton 9.0))
+(message "The square root of 2 is: %s" (sqrt-newton 2.0))
 #+END_SRC
