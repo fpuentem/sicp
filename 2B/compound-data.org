@@ -1,0 +1,82 @@
+#+TITLE: Lecture 2B: Compount data
+#+NAME: Fabricio Puente M.
+#+DATE: <2025-09-20 Sat>
+#+STARTUP: overview
+* Introduction
++ Procedures
++ Primitives
++ Means of combination
++ Means of abstraction
+#+BEGIN_QUOTE
+We divorce the task of building things from the task of implementing the parts.
+#+END_QUOTE
++ Level and levels of implementing procedures in complex systems.
++ Build the system in layters
++ Isolate the details of lower layers to the thigs that appears in upper layers - abstraction.
++ Design strategic - Whishful thinking
+* New Data Objects - Rational Numbers
++ We are asuming that we are able to create new data objects - RAT.
+#+BEGIN_QUOTE
+We'd like the programming language to express the concepts that we have in our heads.
+#+END_QUOTE
++ Glue -> list structure
+  + List Structure
+  + Pairs
+  #+BEGIN_SRC elisp
+    (cons 'x 'y)
+  #+END_SRC
+
+  #+RESULTS:
+  : (x . y)
+  + CAR and CDR
+  #+BEGIN_SRC elisp
+    (car (cons 'x 'y))
+  #+END_SRC
+
+  #+RESULTS:
+  : x
+
+  #+BEGIN_SRC elisp
+    (cdr (cons 'x 'y))
+  #+END_SRC
+
+  #+RESULTS:
+  : y
+* Abstraction Layer
+#+BEGIN_SRC elisp
+  (defun make-rat (n d)
+    "Constructor of a rational number N/D."
+    (cons  n d))
+
+  (defun numer (x)
+    "Return the numerator of X."
+    (car x))
+
+  (defun denom (x)
+    "Return the denominator of X."
+    (cdr x))
+
+  (defun +rat (x y)
+    "Return the sum of X and Y as a rational numbers."
+    (make-rat
+     (+ (* (numer x) (denom y))
+        (* (numer y) (denom x)))
+     (* (denom x) (denom y))))
+
+  (defun *rat (x y)
+    "Return the product of X and Y as rational numbers."
+    (make-rat
+     (* (numer x) (numer y))
+     (* (denom x) (denom y))))
+
+  (setq A (make-rat 1 2))
+  (setq B (make-rat 1 4))
+
+  (setq ANS (+rat A B))
+  (numer ANS)
+  ;; 6
+  (denom ANS)
+  ;; 8
+#+END_SRC
++ USE vs. REPRESENTATION of data objects
++ Methodology: Data Abstraction
