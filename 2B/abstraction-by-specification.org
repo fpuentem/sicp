@@ -1,0 +1,104 @@
+#+TITLE: Abstraction by Specification
+#+DATE: <2025-09-28 Sun>
+
+That's perhaps the most profound and mind-bending concept you'll
+encounter in those Lisp lectures! The professor is getting at the deep
+idea that all data structures in Lisp can be built from the most
+fundamental concept: the procedure (or function).
+
+This is often called the /Church Encoding of data/, and it beautifully
+illustrates the power of Lisp's first-class functions.
+
+1. The "Axiom for Pairs" (The Behavior)
+
+The first image shows the "Axiom for Pairs." An axiom is a statement
+that is assumed to be true without proof. The axiom defines the
+behavior of a pair:
+
+    =cons=: The procedure that constructs a pair out of two elements, x and y.
+
+    =car=: The procedure that retrieves the first element of a pair.
+
+    =cdr=: The procedure that retrieves the second element of a pair.
+
+The Axiom states:
+
+    (car (cons x y)) is x
+
+    (cdr (cons x y)) is y
+
+In other words, a pair is defined only by its guarantee that if you
+stick two things together with cons, you can always get the first one
+back with car and the second one back with cdr. The professor's point
+is that we don't care how a pair is implemented, only that it follows
+this rule.
+
+2. Representing Pairs as Procedures (The Implementation)
+
+The second image demonstrates the proof: You can implement this behavior using only functions (procedures).
+Here is the conversion of that code to Emacs Lisp:
+
+#+BEGIN_SRC elisp
+  ;; --- The "Constructor" Procedure ---
+  (defun cons-proc (a b)
+    "Constructs a pair (A . B) as a procedure.
+    The returned procedure acts as a selector."
+    ;; Returns an anonymous function (a closure) that remembers a and b.
+    (lambda (pick)
+      (cond ((= pick 1) a)
+            ((= pick 2) b)
+            (t (error "Invalid selector")))))
+
+  ;; --- The "Accessor" Procedures ---
+  (defun car-proc (p)
+    "Retrieves the first element of the pair P."
+    ;; To get the first element, we call the pair procedure P with the selector 1.
+    (funcall p 1))
+
+  (defun cdr-proc (p)
+    "Retrieves the second element of the pair P."
+    ;; To get the second element, we call the pair procedure P with the selector 2.
+    (funcall p 2))
+
+  ;; --- Verification ---
+
+  (defvar my-pair (cons-proc 10 'hello)
+    "A pair constructed purely from functions.")
+
+  (message "First element (CAR): %s" (car-proc my-pair))   ;; Expected: 10
+  (message "Second element (CDR): %s" (cdr-proc my-pair))  ;; Expected: hello
+#+END_SRC
+
+How the Procedure Works
+
+    ~cons-proc (a b)~: When you call this function, it doesn't return a
+    memory block; it returns a new function (lambda (pick)). This new
+    function is a closure—it "closes over" or remembers the values of
+    a and b. The values a and b are now hidden inside this function.
+
+    ~car-proc (p)~: When you call ~(car-proc my-pair)~, it executes
+    ~(funcall my-pair 1)~. It calls the function stored in my-pair and
+    passes the selector 1.
+
+    ~The Selector~: Inside the pair function, ~(cond ((= pick 1) a))~ sees
+    the 1, returns the remembered value a, which is the car. If you
+    pass 2, it returns b (the cdr).
+
+The Deep Implication
+
+The whole point of this exercise is to prove the principle of
+Abstraction by Specification.
+
+If you can implement the behavior of a fundamental data type (like a
+pair) entirely using a fundamental programming construct (like a
+procedure), _it means that the true nature of data is defined by the
+operations you perform on it_, not by the physical memory structure it
+uses.
+
+#+BEGIN_EXAMPLE
+    Pairs (Data) = Functions (Procedures)
+#+END_EXAMPLE
+
+This is why Lisp is so powerful—its data and control structures are
+built from the same simple, flexible building blocks (functions),
+leading to its reputation for unmatched simplicity and extensibility.

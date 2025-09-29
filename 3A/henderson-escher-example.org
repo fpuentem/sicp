@@ -1,0 +1,4 @@
+#+TITLE: Lecture 3A: Henderson Escher Example
+#+NAME: Fabricio Puente M.
+#+DATE: <2025-09-28 Sun>
+#+STARTUP: overview

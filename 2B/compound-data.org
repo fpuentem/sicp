@@ -78,5 +78,95 @@ We'd like the programming language to express the concepts that we have in our h
   (denom ANS)
   ;; 8
 #+END_SRC
++ Pairs becomes (num . den)
 + USE vs. REPRESENTATION of data objects
 + Methodology: Data Abstraction
++ How to redude the expression to the lowest term.
+  #+BEGIN_SR lisp
+    (define (make-rat n d)
+    (let ((g (gcd n d)))
+    (cons (/ n g)
+    (/ d g)))
+  #+END_SRC
++ Defining =+rat= without data abstraction
+  #+BEGIN_SRC elisp
+    (defun +rat (x y)
+      "Return the sum of two rational numbers X and Y.
+    In this case, we don't use data abastraction."
+      (cons (+ (* (car x) (cdr y))
+               (* (car y) (cdr x)))
+            (* (cdr x) (cdr y))))
+    (+rat (cons 1 2) (cons 3 4))
+  #+END_SRC
+
+  #+RESULTS:
+  : (10 . 8)
++ Why? (Data abstraction)
+  #+BEGIN_QUOTE
+  One of the most important principles in programming is the same as
+  one of the most import principles in sorcery. That is, if you have
+  the name of the spirit, you get control over it.
+  #+END_QUOTE
++ System Designer
+  #+BEGIN_QUOTE
+  As a system designer you are forced with the necessity to make
+  decisions about how you're going to do things, and in general, the
+  way you'd like to retain flexibility is to never make up your mind
+  about anything until you're forced to do it. The problem is, there's
+  a very, very narrow line between deferring decisions and outright
+  procrastination.
+  #+END_QUOTE
++ Design before to implemented? It is not a good approach
++ Use "simple" data abstraction as building boxes for making more complicated things.
++ How could we represent point in the plane?
+  #+BEGIN_SRC elisp
+    (defun make-vector (x y)
+      "Return the coordinate of a point (X, Y) in the plane."
+      (cons x y))
+
+    (defun xcor (p)
+      "Return the x coordinate of vector P."
+      (car p))
+
+    (defun ycor (p)
+      "Return the y coordinate of vector P."
+      (cdr p))
+  #+END_SRC
++ Representing line segments
+  TO-DO: [[https://youtu.be/DrFkf-T-6Co?list=PLE18841CABEA24090&t=2736][implement length and midpoint procedure]].
+  #+BEGIN_SRC elisp
+    (defun make-seg (p q)
+      "Return the representation of a line segment between P and Q."
+      (cons p q))
+
+    (defun seg-start (s)
+      "Return the start point of vector S."
+      (car s))
+
+    (defun seg-end (s)
+      "Return the end point of vector S."
+      (cdr s))
+  #+END_SRC
++ Layers of abstraction
+  #+BEGIN_SRC artist
+
+                                  Segments
+
+             -------------------------------------------
+
+                                  Vectors
+
+             -------------------------------------------
+                                  Pairs
+#+END_SRC
++ Axiom for pairs - [[https://youtu.be/DrFkf-T-6Co?list=PLE18841CABEA24090&t=3779][Abstraction by Specification]]
+  #+BEGIN_EXAMPLE
+  For any  x and y
+   (car (cons x y)) is x
+   (cdr (cons x y)) is y
+  #+END_EXAMPLE
++ Pairs are *pure* abstraction. Why? These aren't a pair of numbers?
++ In LISP, we blur the line between what is data and what is a procedure.
++ Procedures a are conceptual entities, objects.
++ All data structures in Lisp can be built from the most fundamental concept: the procedure (or function).
++
