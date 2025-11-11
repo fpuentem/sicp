@@ -11,7 +11,7 @@
 We divorce the task of building things from the task of implementing the parts.
 #+END_QUOTE
 + Level and levels of implementing procedures in complex systems.
-+ Build the system in layters
++ Build the system in layers
 + Isolate the details of lower layers to the thigs that appears in upper layers - abstraction.
 + Design strategic - Whishful thinking
 * New Data Objects - Rational Numbers
