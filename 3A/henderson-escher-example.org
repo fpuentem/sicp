@@ -2,3 +2,274 @@
 #+NAME: Fabricio Puente M.
 #+DATE: <2025-09-28 Sun>
 #+STARTUP: overview
+#+URL: [[https://www.youtube.com/watch?v=PEwZL3H2oKg]]
+* Review: Data Abstraction
+
+   The lecture starts with a review of data abstraction, using 2D vectors as the example. The key idea is to separate how data is *used* from how it is *represented*.
+
+** Vector Interface
+
+We define an "interface" of constructor and selectors.
+
+- =make-vector=: Creates a new vector.
+- =xcor=: Selects the x-coordinate.
+- =ycor=: Selects the y-coordinate.
+
+** Vector Representation (Implementation)
+
+   This is the "secret" part that the rest of the program doesn't need to know. The video (which uses Scheme) shows how to alias =cons=, =car=, and =cdr= directly.
+
+   In Elisp, we can do this with =defalias=:
+
+   #+BEGIN_SRC elisp
+     ;; Scheme: (define make-vector cons)
+     (defalias 'make-vector 'cons)
+
+     ;; Scheme: (define xcor car)
+     (defalias 'xcor 'car)
+
+     ;; Scheme: (define ycor cdr)
+     (defalias 'ycor 'cdr)
+   #+END_SRC
+
+   An *idiomatic* Elisp way is to use =defun=, which lets us add documentation and change the implementation later.
+
+   #+BEGIN_SRC elisp
+     (defun make-vector (x y)
+       "Create a 2D vector with coordinates X and Y."
+       (cons x y))
+
+     (defun xcor (vector)
+       "Return the x-coordinate of VECTOR."
+       (car vector))
+
+     (defun ycor (vector)
+       "Return the y-coordinate of VECTOR."
+       (cdr vector))
+   #+END_SRC
+
+** Using the Vector Interface
+
+   Now we can write functions that *use* our vector interface without caring about the =cons= / =car= / =cdr= implementation.
+
+   #+BEGIN_SRC elisp
+     (defun add-vect (v1 v2)
+       "Adds two vectors v1 and v2."
+       (make-vector (+ (xcor v1) (xcor v2))
+                    (+ (ycor v1) (ycor v2))))
+
+     (defun scale-vect (v s)
+       "Multiplies vector v by scalar s."
+       (make-vector (* (xcor v) s)
+                    (* (ycor v) s)))
+
+     ;; --- Test it ---
+     ;; (setq v1 (make-vector 1 2))
+     ;; (setq v2 (make-vector 3 4))
+     ;; (add-vect v1 v2)     ; => (4 . 6)
+     ;; (scale-vect v1 10)  ; => (10 . 20)
+   #+END_SRC
+
+* The Concept of "Closure"
+
+   This is a fundamental property of Lisp's data structures.
+
+   - *Definition:* The things you build with an operation can themselves be combined using the *same operation*.
+   - *Lisp Example:* The =cons= operation is _closed_. You can =(cons 1 2)= to get a pair. You can also =(cons (cons 1 2) (cons 3 4))= to get a pair of pairs.
+   - *Counterexample (from video):* In old Fortran, you could have an "array of numbers" but *not* an "array of arrays". The array operation was not closed.
+   - *Why it matters:* It allows you to build up complexity layer by layer.
+
+   Example: A line segment represented as a pair of vectors (which are themselves pairs).
+
+   #+BEGIN_SRC elisp
+     (defun make-segment (v-start v-end)
+       "Creates a line segment from two vectors."
+       (cons v-start v-end))
+
+     (defun start-segment (segment)
+       "Returns the start vector of the segment."
+       (car segment))
+
+     (defun end-segment (segment)
+       "Returns the end vector of the segment."
+       (cdr segment))
+   #+END_SRC
+
+* Lists: A Convention for Sequences
+
+A "list" in Lisp is just a *convention* for building a sequence out of pairs.
+
+- A list is a chain of =cons= cells.
+- The =car= of each cell holds an element of the list.
+- The =cdr= of each cell points to the next cell.
+- The last =cdr= points to a special marker: =nil= (the empty list).
+
+#+BEGIN_SRC elisp
+  ;; The list (1 2 3) is *really* this:
+  (cons 1 (cons 2 (cons 3 nil)))
+
+  ;; Lisp gives us a "syntactic sugar" for this:
+  (list 1 2 3)
+
+#+END_SRC
+
+* Processing Lists (Recursive Strategies)
+
+Because lists are defined recursively (a list is either =nil= or a =cons= of an element and a list), we can process them recursively.
+
+** Example: =scale-list=
+
+#+BEGIN_SRC elisp
+  (defun scale-list (l s)
+    "Recursively scales each element of list L by scalar S."
+    (if (null l)
+        nil
+      (cons (* (car l) s)
+            (scale-list (cdr l) s))))
+
+  ;; --- Test it ---
+  ;; (scale-list (list 1 2 3 4) 10) ; => (10 20 30 40)
+#+END_SRC
+
+** Higher-Order Procedure: =map=
+
+The =scale-list= function follows a general pattern: "apply a procedure to every element of a list and collect the results." We can abstract this pattern into a higher-order procedure.
+
+Elisp has this built-in as =mapcar=.
+
+#+BEGIN_SRC elisp
+  ;; How map is defined (conceptually):
+  (defun my-mapcar (proc l)
+    "Applies PROC to each element of L and returns a list of results."
+    (if (null l)
+        nil
+      (cons (funcall proc (car l))
+            (my-mapcar proc (cdr l)))))
+
+  ;; Now we can redefine scale-list using mapcar!
+  (defun scale-list-v2 (l s)
+    "Scales a list using mapcar and a lambda."
+    (mapcar (lambda (item) (* item s))
+            l))
+
+  ;; --- Test it ---
+  ;; (scale-list-v2 (list 1 2 3 4) 10)
+#+END_SRC
+
+** =map= vs. =for-each=
+
+- =map= (or =mapcar=): *Builds and returns a new list* of the results.
+- =for-each= (or =mapc=): *Discards the return value*. It's used for side-effects, like printing.
+
+#+BEGIN_SRC elisp
+  ;; (mapcar (lambda (x) (print x)) (list 1 2 3))
+  ;; (mapc (lambda (x) (print x)) (list 1 2 3))
+#+END_SRC
+
+* Metalinguistic Abstraction: The Henderson Escher Example
+
+This is the main part of the lecture. Instead of just solving one problem, we *build _a language* to solve a *whole class* of problems_.
+
+- *The Goal:* Create a language for generating complex, recursive images (like Escher's).
+- *The Idea:* The "data" (a picture) will be represented as a *procedure*. This blurs the line between data and procedures.
+
+** The Picture Language: Primitives
+
+- Primitive Element: A *picture*.
+  #+BEGIN_SRC elisp
+    (defun coord-map (rect)
+      "Return a function that maps unit points (0-1) to the given RECT."
+      (lambda (point)
+        (add-vect
+         (add-vect (scale-vect (xcor point)
+                       (horiz
+                        rect))
+                (scale-vect (ycor point)
+                       (vert rect)))
+         (origin rect))))
+   #+END_SRC
+
+- *What is a picture?* It's *not* a set of pixels. It's a /procedure/ that takes a /rectangle/ as an argument and "draws itself" scaled to fit that rectangle.
+- *What is a rectangle?* We can define an interface for it (using vectors).
+  - =make-rectangle= (origin v-horizontal v-vertical)
+  - =origin-rect=, =horiz-rect=, =vert-rect=
+
+** The Picture Language: Means of Combination
+
+These are procedures that *take pictures* and *return a new picture*.
+
+- =(beside p1 p2)=: Returns a new picture procedure. When this new picture is called with a rectangle, it draws =p1= in the left half and =p2= in the right half.
+- =(above p1 p2)=: Similar, but for top/bottom halves.
+- =(rotate p)=: Rotates the picture.
+- =(flip p)=: Flips the picture.
+
+** The Picture Language: Closure
+
+The =beside= operation is *closed*.
+- It takes two *pictures* (procedures) as input.
+- It returns a new *picture* (a new procedure).
+- This means we can do =(beside p1 (beside p2 p3))=. This is how complexity is built!
+
+** The Picture Language: Means of Abstraction
+
+Because our "pictures" and "combinators" are just Lisp procedures, we get all of Lisp's abstraction tools for free!
+
+- *Recursion:* We can define a *recursive picture*.
+
+  Example: =(right-push p n)= could be a picture of =p= beside a =(right-push p (n-1))=. This is how the Escher-like tiling is achieved.
+
+- *Higher-Order Procedures:* We can write a procedure =(push op)= that *takes a combinator* (like =beside= or =above=) and returns a recursive "push" procedure (like =right-push= or =up-push=).
+
+* Key Takeaways
+
+1. *Data Abstraction:* Hide implementation (e.g., =cons=) behind an interface (e.g., =make-vector=).
+2. *Closure:* A powerful property that lets you build complex things from simple parts.
+3. *Procedures as Data:* The "picture" is a procedure. This is a very powerful idea.
+4. *Metalinguistic Abstraction:* The most powerful way to design a system is to build a language for it. By *embedding* this new language in Lisp, we get all of Lisp's power (recursion, HOFs) for free.
+5. Roubustnes
+   + Each node is being designed to do a specific thing.
+
+     #+BEGIN_SRC artist
+                                                           -+-
+                                                       ---/ | \---
+                                                    --/     |     \---
+                                                 --/        |         \--
+                                             ---/           |            \---
+                                           /| \            ---               \+-
+                                         -/ |  \-        -/   \--           -/| \-
+                                        /   |    \     -/        \-        /  |   \-
+                                      -/    |     \                      -/    \    \-
+                                     /      |      \-                  -/      |      \-
+                                   -/       |        \                /        |        \-
+                                  /         |                                  |
+     #+END_SRC
+
+   + You have is a full range of linguistic power at each level.
+
+     #+BEGIN_SRC artist
+
+                               +---------------------------------------+
+                               |                                       |
+                               |  LANGUAGES OF SCHEMES OF COMBINATION  |
+                               |                                       |
+                               |                                       |
+                               +-------+-----------+-----------+-------+
+                                       |           |           |
+                                       |           |           |
+                                       |           |           |
+                               +-------+-----------+-----------+-------+
+                               |                                       |
+                               |    LANGUAGES OF GEOMETRIC POSITIONS   |
+                               |                                       |
+                               |                                       |
+                               +-------+-----------+-----------+-------+
+                                       |           |           |
+                                       |          /            |
+                                       |          |            |
+                               +-------+-----------------------+-------+
+                               |                                       |
+                               |     LANGUAGE OF PRIMITIVE PICS        |
+                               |                                       |
+                               |                                       |
+                               +---------------------------------------+
+       #+END_SRC
