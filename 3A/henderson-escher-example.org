@@ -1,5 +1,5 @@
 #+TITLE: Lecture 3A: Henderson Escher Example
-#+NAME: Fabricio Puente M.
+#+AUTHOR: Fabricio Puente M.
 #+DATE: <2025-09-28 Sun>
 #+STARTUP: overview
 #+URL: [[https://www.youtube.com/watch?v=PEwZL3H2oKg]]
