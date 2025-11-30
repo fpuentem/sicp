@@ -1,7 +1,7 @@
-#+TITLE: Lecture 3B: Symbolic Differentiation & Quotation (SICP)
-#+AUTHOR: Fabricio Puente M.
+#+TITLE: Lecture 3B: Symbolic Differentiation & Quotation
+#+AUTHOR: Fabricio R. Puente Mansilla
 #+DATE: <2025-11-29 Sat>
-#+STARTUP: indent
+#+STARTUP: indent overview
 #+URL: https://youtu.be/bV87UzKMRtE?si=Df87ykdP3x2uSS8X
 
 * Quotation: The Concept
