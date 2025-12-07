@@ -3,6 +3,7 @@
 #+DATE: <2025-11-30 Sun>
 #+STARTUP: indent overview
 #+URL: https://youtu.be/_fXQ1SwKjDg?list=PLE18841CABEA24090
+
 * Introduction: From Specific to General
 :PROPERTIES:
 :CUSTOM_ID: introduction
@@ -14,7 +15,7 @@ In the previous lecture (Symbolic Differentiation), we built a program ~deriv~ t
 
 *The Solution (Lecture 4A):* We want to move from a *procedural* approach (writing code that does the math) to a *declarative* approach (writing the rules as data, and having a general engine apply them).
 
-We are building a **Language for Simplification** embedded inside Lisp. This is a core SICP theme: *Metalinguistic Abstraction*.
+We are building a *Language for Simplification* embedded inside Lisp. This is a core SICP theme: *Metalinguistic Abstraction*.
 
 * Concept 1: The "Two Worlds"
 :PROPERTIES:
@@ -22,24 +23,23 @@ We are building a **Language for Simplification** embedded inside Lisp. This is 
 :END:
 
 To understand this lecture, you must distinguish between two "worlds" that exist simultaneously:
+1. The World of the Matcher (The Engine): This is the Lisp code we write (~match~, ~instantiate~). It processes lists and symbols. It doesn't know math; it only knows shapes.
+2. The World of the Rules (The Data): This is the language we invent. It contains patterns like ~(+ (? x) 0)~.
 
-1.  **The World of the Matcher (The Engine):** This is the Lisp code we write (~match~, ~instantiate~). It processes lists and symbols. It doesn't know math; it only knows shapes.
-2.  **The World of the Rules (The Data):** This is the language we invent. It contains patterns like ~(+ (? x) 0)~.
-
-*Difficulty Alert:* It gets confusing because both worlds look like Lisp lists. A list `(+ a b)` could be a piece of data we are inspecting, or it could be a piece of code we are executing. In this lecture, we treat mathematical expressions almost entirely as *data* (trees of symbols).
+*Difficulty Alert:* It gets confusing because both worlds look like Lisp lists. A list =(+ a b)= could be a piece of data we are inspecting, or it could be a piece of code we are executing. In this lecture, we treat mathematical expressions almost entirely as *data* (trees of symbols).
 
 * Concept 2: Pattern Matching
 :PROPERTIES:
 :CUSTOM_ID: concept-pattern-matching
 :END:
 
- A **Pattern** is a template that looks like the data but contains "holes" (variables).
+ A *Pattern* is a template that looks like the data but contains "holes" (variables).
 
-  - **Data:** ~(+ 5 0)~
-  - **Pattern:** ~(+ (? x) 0)~
-  - **Result:** The pattern matches if we set ~x = 5~.
+  - *Data:* ~(+ 5 0)~
+  - *Pattern:* ~(+ (? x) 0)~
+  - *Result:* The pattern matches if we set ~x = 5~.
 
- The **Matcher** is a function that takes:
+ The *Matcher* is a function that takes:
   1.  A Pattern (e.g., ~(+ (? x) 0)~)
   2.  An Expression (e.g., ~(+ 5 0)~)
   3.  A Dictionary (Context)
@@ -51,16 +51,16 @@ To understand this lecture, you must distinguish between two "worlds" that exist
 :CUSTOM_ID: concept-instantiation
 :END:
 
-A **Skeleton** is the template for the *answer*. It also contains holes, but these holes are meant to be *filled* by the dictionary we built during matching.
+A *Skeleton* is the template for the *answer*. It also contains holes, but these holes are meant to be *filled* by the dictionary we built during matching.
 
-  - **Skeleton:** `(? x)`
-  - **Dictionary:** `{x: 5}`
-  - **Result:** `5`
+  - *Skeleton:* =(? x)=
+  - *Dictionary:* ={x: 5}=
+  - *Result:* =5=
 
 In the lecture, Sussman uses specific syntax:
 
-  - `(? x)` : A pattern variable (matches anything).
-  - `(: x)` : A skeleton variable (substitution target).
+  - =(? x)= : A pattern variable (matches anything).
+  - =(: x)= : A skeleton variable (substitution target).
 
 * Implementation in Elisp
   :PROPERTIES:
@@ -69,202 +69,204 @@ In the lecture, Sussman uses specific syntax:
 
   Below is the complete implementation adapted for Emacs Lisp.
 
-** 1. Helper Functions
-   We need ways to identify our "special syntax" (lists starting with `?` or `:`).
+** Helper Functions
+We need ways to identify our "special syntax" (lists starting with `?` or `:`).
 
-   #+BEGIN_SRC elisp
-     (defun tagged-list-p (exp tag)
-       "Check if EXP is a list starting with TAG."
-       (and (listp exp)
-            (eq (car exp) tag)))
+#+BEGIN_SRC elisp
+  (defun tagged-list-p (exp tag)
+    "Check if EXP is a list starting with TAG."
+    (and (listp exp)
+         (eq (car exp) tag)))
 
-     (defun pattern-var-p (exp)
-       "Is EXP a pattern variable like (? x)?"
-       (tagged-list-p exp '?))
+  (defun pattern-var-p (exp)
+    "Is EXP a pattern variable like (? x)?"
+    (tagged-list-p exp '?))
 
-     (defun skeleton-var-p (exp)
-       "Is EXP a skeleton variable like (: x)?"
-       (tagged-list-p exp ':))
+  (defun skeleton-var-p (exp)
+    "Is EXP a skeleton variable like (: x)?"
+    (tagged-list-p exp ':))
 
-     (defun var-name (exp)
-       "Get the variable name from (? x) or (: x)."
-       (cadr exp))
-   #+END_SRC
+  (defun var-name (exp)
+    "Get the variable name from (? x) or (: x)."
+    (cadr exp))
+#+END_SRC
 
-** 2. The Dictionary
-   The dictionary stores our matches. We use a Lisp Association List (alist).
-   - Empty: ~nil~
-   - Success: ~((x . 5) (y . 10))~
-   - Failure: ~'failed~
+** The Dictionary
+The dictionary stores our matches. We use a Lisp Association List (alist).
++ Empty: ~nil~
 
-   #+BEGIN_SRC elisp
-     (defun extend-dict (pat-var current-exp dict)
-       "Add a variable definition to the dictionary."
-       (let ((name (var-name pat-var)))
-         (let ((binding (assoc name dict)))
-           (cond
-            ;; Case 1: Variable already bound. Check consistency.
-            (binding
-             (if (equal (cdr binding) current-exp)
-                 dict     ; Consistent match
-               'failed))  ; Inconsistent (x matched 5 before, now matches 6)
-            ;; Case 2: Variable not bound. Add it.
-            (t (cons (cons name current-exp) dict))))))
++ Success: ~((x . 5) (y . 10))~
 
-     (defun lookup (varname dict)
-       "Find value of VARNAME in DICT."
-       (let ((binding (assoc varname dict)))
-         (if binding
-             (cdr binding)
-           (error "Variable %s not found in dictionary" varname))))
-   #+END_SRC
++ Failure: ~'failed~
 
-** 3. The Matcher (The Core Engine)
-   This function compares trees recursively.
+#+BEGIN_SRC elisp
+  (defun extend-dict (pat-var current-exp dict)
+    "Add a variable definition to the dictionary."
+    (let ((name (var-name pat-var)))
+      (let ((binding (assoc name dict)))
+        (cond
+         ;; Case 1: Variable already bound. Check consistency.
+         (binding
+          (if (equal (cdr binding) current-exp)
+              dict     ; Consistent match
+            'failed))  ; Inconsistent (x matched 5 before, now matches 6)
+         ;; Case 2: Variable not bound. Add it.
+         (t (cons (cons name current-exp) dict))))))
 
-   #+BEGIN_SRC elisp
-     (defun match (pat exp dict)
-       "Match PATTERN against EXPRESSION given DICTIONARY."
-       (cond
-        ;; 1. Propagate failure
-        ((eq dict 'failed) 'failed)
-        ;; 2. Match Atomic Pattern (Symbols/Numbers)
-        ((not (listp pat))
-         (if (not (listp exp))
-             (if (equal pat exp) dict 'failed)
-           'failed))
-        ;; 3. Match Pattern Variable (? x)
-        ((pattern-var-p pat)
-         (extend-dict pat exp dict))
-        ;; 4. Match Recursive Structure (Lists)
-        (t
-         (if (not (listp exp))
-             'failed
-           (match (cdr pat)                ; Match the rest...
-                  (cdr exp)
-                  (match (car pat)         ; ...using dict from matching the first part
-                         (car exp)
-                         dict))))))
-   #+END_SRC
+  (defun lookup (varname dict)
+    "Find value of VARNAME in DICT."
+    (let ((binding (assoc varname dict)))
+      (if binding
+          (cdr binding)
+        (error "Variable %s not found in dictionary" varname))))
+           #+END_SRC
 
-** 4. The Instantiator (The Builder)
-   This builds the new expression using the dictionary.
+** The Matcher (The Core Engine)
+This function compares trees recursively.
 
-   #+BEGIN_SRC elisp
-     (defun instantiate (skel dict)
-       "Build expression from SKELETON and DICTIONARY."
-       (cond
-        ;; 1. Replace Skeleton Variable (: x)
-        ((skeleton-var-p skel)
-         (lookup (var-name skel) dict))
-        ;; 2. Recurse on Lists
-        ((listp skel)
-         (cons (instantiate (car skel) dict)
-               (instantiate (cdr skel) dict)))
-        ;; 3. Constants passed through
-        (t skel)))
-   #+END_SRC
+#+BEGIN_SRC elisp
+  (defun match (pat exp dict)
+    "Match PATTERN against EXPRESSION given DICTIONARY."
+    (cond
+     ;; 1. Propagate failure
+     ((eq dict 'failed) 'failed)
+     ;; 2. Match Atomic Pattern (Symbols/Numbers)
+     ((not (listp pat))
+      (if (not (listp exp))
+          (if (equal pat exp) dict 'failed)
+        'failed))
+     ;; 3. Match Pattern Variable (? x)
+     ((pattern-var-p pat)
+      (extend-dict pat exp dict))
+     ;; 4. Match Recursive Structure (Lists)
+     (t
+      (if (not (listp exp))
+          'failed
+        (match (cdr pat)                ; Match the rest...
+               (cdr exp)
+               (match (car pat)         ; ...using dict from matching the first part
+                      (car exp)
+                      dict))))))
+#+END_SRC
 
-** 5. The Simplifier (The System)
-   This is the "main loop" that tries to apply rules to an expression.
+** The Instantiator (The Builder)
+This builds the new expression using the dictionary.
+
+#+BEGIN_SRC elisp
+  (defun instantiate (skel dict)
+    "Build expression from SKELETON and DICTIONARY."
+    (cond
+     ;; 1. Replace Skeleton Variable (: x)
+     ((skeleton-var-p skel)
+      (lookup (var-name skel) dict))
+     ;; 2. Recurse on Lists
+     ((listp skel)
+      (cons (instantiate (car skel) dict)
+            (instantiate (cdr skel) dict)))
+     ;; 3. Constants passed through
+     (t skel)))
+#+END_SRC
+
+** The Simplifier (The System)
+This is the "main loop" that tries to apply rules to an expression.
 
 
 
 [Image of rule based system architecture]
 
 
-   #+BEGIN_SRC elisp
-     (defun simplifier (the-rules)
-       "Returns a function that simplifies expressions using THE-RULES."
-       (lexical-let ((rules the-rules)) ; Use closure to keep rules
-         (lambda (exp)
-           (letrec ((simplify-exp
-                     (lambda (e)
-                       (try-rules (if (listp e)
-                                      (simplify-parts e) ; Recursively simplify parts first
-                                    e))))
-                    (simplify-parts
-                     (lambda (e)
-                       (if (null e)
-                           nil
-                         (cons (funcall simplify-exp (car e))
-                               (funcall simplify-parts (cdr e))))))
-                    (try-rules
-                     (lambda (e)
-                       (scan rules e)))
-                    (scan
-                     (lambda (rs e)
-                       (if (null rs)
-                           e ; No rules matched, return expression as is
-                         (let* ((rule (car rs))
-                                (pat (car rule))
-                                (skel (cadr rule))
-                                (dict (match pat e nil)))
-                           (if (eq dict 'failed)
-                               (funcall scan (cdr rs) e) ; Try next rule
-                             ;; SUCCESS: Instantiate skeleton and simplify AGAIN
-                             (funcall simplify-exp (instantiate skel dict))))))))
-             (funcall simplify-exp exp)))))
-   #+END_SRC
+#+BEGIN_SRC elisp
+  (defun simplifier (the-rules)
+    "Returns a function that simplifies expressions using THE-RULES."
+    (lexical-let ((rules the-rules)) ; Use closure to keep rules
+                 (lambda (exp)
+                   (letrec ((simplify-exp
+                             (lambda (e)
+                               (try-rules (if (listp e)
+                                              (simplify-parts e) ; Recursively simplify parts first
+                                            e))))
+                            (simplify-parts
+                             (lambda (e)
+                               (if (null e)
+                                   nil
+                                 (cons (funcall simplify-exp (car e))
+                                       (funcall simplify-parts (cdr e))))))
+                            (try-rules
+                             (lambda (e)
+                               (scan rules e)))
+                            (scan
+                             (lambda (rs e)
+                               (if (null rs)
+                                   e ; No rules matched, return expression as is
+                                 (let* ((rule (car rs))
+                                        (pat (car rule))
+                                        (skel (cadr rule))
+                                        (dict (match pat e nil)))
+                                   (if (eq dict 'failed)
+                                       (funcall scan (cdr rs) e) ; Try next rule
+                                     ;; SUCCESS: Instantiate skeleton and simplify AGAIN
+                                     (funcall simplify-exp (instantiate skel dict))))))))
+                     (funcall simplify-exp exp)))))
+    #+END_SRC
 
 * Example: Algebra Rules
-  :PROPERTIES:
-  :CUSTOM_ID: example-run
-  :END:
+:PROPERTIES:
+:CUSTOM_ID: example-run
+:END:
 
-  Let's define the calculus rules from the lecture.
+Let's define the calculus rules from the lecture.
 
-  *Rule Format:* `( (PATTERN) (SKELETON) )`
+*Rule Format:* =( (PATTERN) (SKELETON) )=
 
-  #+BEGIN_SRC elisp
-    (defvar algebra-rules
-      '(
-        ;; x + 0 = x
-        ( (+ (? x) 0)
-          (: x) )
-        ;; 0 + x = x
-        ( (+ 0 (? x))
-          (: x) )
-        ;; x * 1 = x
-        ( (* (? x) 1)
-          (: x) )
-        ;; 1 * x = x
-        ( (* 1 (? x))
-          (: x) )
-        ;; x * 0 = 0
-        ( (* (? x) 0)
-          0 )
-        ;; x + x = 2x
-        ( (+ (? x) (? x))
-          (* 2 (: x)) )
-        ))
+#+BEGIN_SRC elisp
+  (defvar algebra-rules
+    '(
+      ;; x + 0 = x
+      ( (+ (? x) 0)
+        (: x) )
+      ;; 0 + x = x
+      ( (+ 0 (? x))
+        (: x) )
+      ;; x * 1 = x
+      ( (* (? x) 1)
+        (: x) )
+      ;; 1 * x = x
+      ( (* 1 (? x))
+        (: x) )
+      ;; x * 0 = 0
+      ( (* (? x) 0)
+        0 )
+      ;; x + x = 2x
+      ( (+ (? x) (? x))
+        (* 2 (: x)) )
+      ))
 
-    ;; Create the simplify function
-    (setq my-simplify (simplifier algebra-rules))
-  #+END_SRC
+  ;; Create the simplify function
+  (setq my-simplify (simplifier algebra-rules))
+#+END_SRC
 
-  *Test Cases:*
-  You can evaluate these in Emacs to see the result.
+*Test Cases:*
+You can evaluate these in Emacs to see the result.
 
-  #+BEGIN_SRC elisp
-    ;; Simple: (+ x 0) -> x
-    (funcall my-simplify '(+ x 0))
+#+BEGIN_SRC elisp
+  ;; Simple: (+ x 0) -> x
+  (funcall my-simplify '(+ x 0))
 
-    ;; Recursive: (+ 0 (+ y 0)) -> y
-    ;; 1. Inner (+ y 0) becomes y
-    ;; 2. Outer (+ 0 y) becomes y
-    (funcall my-simplify '(+ 0 (+ y 0)))
+  ;; Recursive: (+ 0 (+ y 0)) -> y
+  ;; 1. Inner (+ y 0) becomes y
+  ;; 2. Outer (+ 0 y) becomes y
+  (funcall my-simplify '(+ 0 (+ y 0)))
 
-    ;; Complex: (+ (* x 0) (+ y y))
-    ;; 1. (* x 0) -> 0
-    ;; 2. (+ y y) -> (* 2 y)
-    ;; 3. (+ 0 (* 2 y)) -> (* 2 y)
-    (funcall my-simplify '(+ (* x 0) (+ y y)))
+  ;; Complex: (+ (* x 0) (+ y y))
+  ;; 1. (* x 0) -> 0
+  ;; 2. (+ y y) -> (* 2 y)
+  ;; 3. (+ 0 (* 2 y)) -> (* 2 y)
+  (funcall my-simplify '(+ (* x 0) (+ y y)))
   #+END_SRC
 
 * Key Takeaways for Study
-  1.  **Declarative Power:** Notice `algebra-rules` is just a list. We can add trigonometry rules without touching the `simplifier` code at all.
-  2.  **Recursion Everywhere:** - The *Matcher* recurses down the tree to check equality.
-      - The *Simplifier* recurses down the tree to simplify sub-expressions first (bottom-up simplification).
-      - The *Simplifier* recurses on itself after a replacement (to handle cases where one rule creates an output that triggers another rule).
-  3.  **Garbage In / Garbage Out:** This specific simplifier is purely syntactic. It doesn't know that $x+y$ is the same as $y+x$ unless you explicitly write a rule for commutativity (which is dangerous because it can cause infinite loops!).
+1. Declarative Power: Notice /algebra-rules/ is just a list. We can add trigonometry rules without touching the /simplifier/ code at all.
+2. Recursion Everywhere: - The *Matcher* recurses down the tree to check equality.
+   - The *Simplifier* recurses down the tree to simplify sub-expressions first (bottom-up simplification).
+   - The *Simplifier* recurses on itself after a replacement (to handle cases where one rule creates an output that triggers another rule).
+3. Garbage In / Garbage Out: This specific simplifier is purely syntactic. It doesn't know that =x+y= is the same as =y+x= unless you explicitly write a rule for commutativity (which is dangerous because it can cause infinite loops!).
