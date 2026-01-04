@@ -9,31 +9,47 @@
 :CUSTOM_ID: introduction
 :END:
 
-In the previous lecture (Symbolic Differentiation), we built a program ~deriv~ that was "smart" about calculus. However, all the intelligence was hard-coded into the Lisp procedures (using ~cond~ branches like ~(sum? exp)~).
+In the previous lecture (Symbolic Differentiation), we built a program
+~deriv~ that was "smart" about calculus. However, all the intelligence
+was hard-coded into the Lisp procedures (using ~cond~ branches like
+~(sum? exp)~).
 
-*The Problem:* If we wanted to add a new rule (e.g., trigonometry), we had to rewrite the ~deriv~ function logic.
+*The Problem:* If we wanted to add a new rule (e.g., trigonometry), we
+had to rewrite the ~deriv~ function logic.
 
-*The Solution (Lecture 4A):* We want to move from a *procedural* approach (writing code that does the math) to a *declarative* approach (writing the rules as data, and having a general engine apply them).
+*The Solution (Lecture 4A):* We want to move from a *procedural* approach
+(writing code that does the math) to a *declarative* approach (writing
+the rules as data, and having a general engine apply them).
 
-We are building a *Language for Simplification* embedded inside Lisp. This is a core SICP theme: *Metalinguistic Abstraction*.
+We are building a *Language for Simplification* embedded inside
+Lisp. This is a core SICP theme: *Metalinguistic Abstraction*.
 
 * Concept 1: The "Two Worlds"
 :PROPERTIES:
 :CUSTOM_ID: concept-two-worlds
 :END:
 
-To understand this lecture, you must distinguish between two "worlds" that exist simultaneously:
-1. The World of the Matcher (The Engine): This is the Lisp code we write (~match~, ~instantiate~). It processes lists and symbols. It doesn't know math; it only knows shapes.
-2. The World of the Rules (The Data): This is the language we invent. It contains patterns like ~(+ (? x) 0)~.
+To understand this lecture, you must distinguish between two "worlds"
+that exist simultaneously:
+1. The World of the Matcher (The Engine): This is the Lisp code we
+   write (~match~, ~instantiate~). It processes lists and symbols. It
+   doesn't know math; it only knows shapes.
+2. The World of the Rules (The Data): This is the language we
+   invent. It contains patterns like ~(+ (? x) 0)~.
 
-*Difficulty Alert:* It gets confusing because both worlds look like Lisp lists. A list =(+ a b)= could be a piece of data we are inspecting, or it could be a piece of code we are executing. In this lecture, we treat mathematical expressions almost entirely as *data* (trees of symbols).
+*Difficulty Alert:* It gets confusing because both worlds look like
+Lisp lists. A list =(+ a b)= could be a piece of data we are
+inspecting, or it could be a piece of code we are executing. In this
+lecture, we treat mathematical expressions almost entirely as *data*
+(trees of symbols).
 
 * Concept 2: Pattern Matching
 :PROPERTIES:
 :CUSTOM_ID: concept-pattern-matching
 :END:
 
- A *Pattern* is a template that looks like the data but contains "holes" (variables).
+ A *Pattern* is a template that looks like the data but contains "holes"
+ (variables).
 
   - *Data:* ~(+ 5 0)~
   - *Pattern:* ~(+ (? x) 0)~
@@ -44,14 +60,17 @@ To understand this lecture, you must distinguish between two "worlds" that exist
   2.  An Expression (e.g., ~(+ 5 0)~)
   3.  A Dictionary (Context)
 
- It returns an *extended dictionary* containing the new variable bindings, or ~'failed~ if the shapes don't match.
+ It returns an *extended dictionary* containing the new variable
+ bindings, or ~'failed~ if the shapes don't match.
 
 * Concept 3: Instantiation (Skeletons)
 :PROPERTIES:
 :CUSTOM_ID: concept-instantiation
 :END:
 
-A *Skeleton* is the template for the *answer*. It also contains holes, but these holes are meant to be *filled* by the dictionary we built during matching.
+A *Skeleton* is the template for the *answer*. It also contains holes, but
+these holes are meant to be *filled* by the dictionary we built during
+matching.
 
   - *Skeleton:* =(? x)=
   - *Dictionary:* ={x: 5}=
@@ -119,7 +138,7 @@ The dictionary stores our matches. We use a Lisp Association List (alist).
       (if binding
           (cdr binding)
         (error "Variable %s not found in dictionary" varname))))
-           #+END_SRC
+#+END_SRC
 
 ** The Matcher (The Core Engine)
 This function compares trees recursively.
@@ -177,37 +196,37 @@ This is the "main loop" that tries to apply rules to an expression.
 
 #+BEGIN_SRC elisp
   (defun simplifier (the-rules)
-    "Returns a function that simplifies expressions using THE-RULES."
-    (lexical-let ((rules the-rules)) ; Use closure to keep rules
-                 (lambda (exp)
-                   (letrec ((simplify-exp
-                             (lambda (e)
-                               (try-rules (if (listp e)
-                                              (simplify-parts e) ; Recursively simplify parts first
-                                            e))))
-                            (simplify-parts
-                             (lambda (e)
-                               (if (null e)
-                                   nil
-                                 (cons (funcall simplify-exp (car e))
-                                       (funcall simplify-parts (cdr e))))))
-                            (try-rules
-                             (lambda (e)
-                               (scan rules e)))
-                            (scan
-                             (lambda (rs e)
-                               (if (null rs)
-                                   e ; No rules matched, return expression as is
-                                 (let* ((rule (car rs))
-                                        (pat (car rule))
-                                        (skel (cadr rule))
-                                        (dict (match pat e nil)))
-                                   (if (eq dict 'failed)
-                                       (funcall scan (cdr rs) e) ; Try next rule
-                                     ;; SUCCESS: Instantiate skeleton and simplify AGAIN
-                                     (funcall simplify-exp (instantiate skel dict))))))))
-                     (funcall simplify-exp exp)))))
-    #+END_SRC
+  "Returns a function that simplifies expressions using THE-RULES."
+  (lexical-let ((rules the-rules)) ; Use closure to keep rules
+    (lambda (exp)
+      (letrec ((simplify-exp
+                (lambda (e)
+                  (try-rules (if (listp e)
+                                 (simplify-parts e) ; Recursively simplify parts first
+                               e))))
+               (simplify-parts
+                (lambda (e)
+                  (if (null e)
+                      nil
+                    (cons (funcall simplify-exp (car e))
+                          (funcall simplify-parts (cdr e))))))
+               (try-rules
+                (lambda (e)
+                  (scan rules e)))
+               (scan
+                (lambda (rs e)
+                  (if (null rs)
+                      e ; No rules matched, return expression as is
+                    (let* ((rule (car rs))
+                           (pat (car rule))
+                           (skel (cadr rule))
+                           (dict (match pat e nil)))
+                      (if (eq dict 'failed)
+                          (funcall scan (cdr rs) e) ; Try next rule
+                        ;; SUCCESS: Instantiate skeleton and simplify AGAIN
+                        (funcall simplify-exp (instantiate skel dict))))))))
+        (funcall simplify-exp exp)))))
+#+END_SRC
 
 * Example: Algebra Rules
 :PROPERTIES:
@@ -249,20 +268,15 @@ Let's define the calculus rules from the lecture.
 You can evaluate these in Emacs to see the result.
 
 #+BEGIN_SRC elisp
-  ;; Simple: (+ x 0) -> x
-  (funcall my-simplify '(+ x 0))
+  ;; Simple: (+ x 0) -> x (funcall my-simplify '(+ x 0))
 
-  ;; Recursive: (+ 0 (+ y 0)) -> y
-  ;; 1. Inner (+ y 0) becomes y
-  ;; 2. Outer (+ 0 y) becomes y
-  (funcall my-simplify '(+ 0 (+ y 0)))
+  ;; Recursive: (+ 0 (+ y 0)) -> y 1. Inner (+ y 0) becomes y 2. Outer
+  ;; (+ 0 y) becomes y (funcall my-simplify '(+ 0 (+ y 0)))
 
-  ;; Complex: (+ (* x 0) (+ y y))
-  ;; 1. (* x 0) -> 0
-  ;; 2. (+ y y) -> (* 2 y)
-  ;; 3. (+ 0 (* 2 y)) -> (* 2 y)
-  (funcall my-simplify '(+ (* x 0) (+ y y)))
-  #+END_SRC
+  ;; Complex: (+ (* x 0) (+ y y)) 1. (* x 0) -> 0 2. (+ y y) -> (* 2 y)
+  ;; 3. (+ 0 (* 2 y)) -> (* 2 y) (funcall my-simplify '(+ (* x 0) (+ y
+  ;; y)))
+#+END_SRC
 
 * Key Takeaways for Study
 1. Declarative Power: Notice /algebra-rules/ is just a list. We can add trigonometry rules without touching the /simplifier/ code at all.
