@@ -1,0 +1,451 @@
+#+TITLE: Lecture 4B: Generic Operators (Data-Directed Programming)
+#+AUTHOR: Fabricio Puente Mansilla
+#+DATE: <2026-01-04 Sun>
+#+STARTUP: indent overview
+
+* Introduction: The Problem of Additive Software
+  :PROPERTIES:
+  :CUSTOM_ID: introduction
+  :END:
+
+In the previous lectures, we learned about *Data Abstraction*
+(building barriers between use and implementation). However, for
+complex systems, simple abstraction isn't enough.
+
+*The Scenario:* Imagine a large system built by two different people,
+"George" and "Martha".
+
+- *George* writes a package to handle Complex Numbers using
+  *Rectangular* coordinates ($x, y$).
+
+- *Martha* writes a package to handle Complex Numbers using *Polar*
+  coordinates ($r, A$).
+
+*The Conflict:*
+
+We want to write a high-level system (like an arithmetic simplifier)
+that can add, subtract, multiply, and divide complex numbers
+*regardless* of whether they are George's or Martha's.
+
+- We don't want the high-level code to know about the internal details.
+
+- We want to be able to add a *third* representation (say, by "Harry")
+  without rewriting the existing code. This is called *Additive*
+  system design.
+
+*The Solution:*
+
+We need *Generic Operations*. A generic operation
+(like ~real-part~) looks at the data it is given, figures out what
+kind of data it is, and then calls the correct specific function.
+
+* Tagged Data
+  :PROPERTIES:
+  :CUSTOM_ID: tagged-data
+  :END:
+
+To make this work, the data itself must carry an ID card. We call
+this a *Type Tag*.
+
+- Ordinary data: ~(3 . 4)~ (Could be anything: a point, a fraction,
+  a complex number).
+
+- Tagged data: ~(rectangular . (3 . 4))~ (Now we know exactly what
+  it is).
+
+** Elisp Implementation of Tags
+
+We need primitive functions to attach tags, remove tags, and check tags.
+
+#+BEGIN_SRC elisp
+  (defun attach-tag (type-tag contents)
+    "Attach a TYPE-TAG to CONTENTS."
+    (cons type-tag contents))
+
+  (defun type-tag (datum)
+    "Return the tag of DATUM."
+    (if (consp datum)
+        (car datum)
+      (error "Bad tagged datum -- TYPE-TAG %s" datum)))
+
+  (defun contents (datum)
+    "Return the contents of DATUM (without the tag)."
+    (if (consp datum)
+        (cdr datum)
+      (error "Bad tagged datum -- CONTENTS %s" datum)))
+
+  ;; Check if a datum has a specific tag
+  (defun rectangular-p (z) (eq (type-tag z) 'rectangular))
+  (defun polar-p (z) (eq (type-tag z) 'polar))
+#+END_SRC
+
+* The "Manager" Approach (Dispatch on Type)
+:PROPERTIES:
+:CUSTOM_ID: dispatch-on-type
+:END:
+
+*Note:* This is the "Bad" way (the stepping stone).
+
+In this approach, we write a "Manager" function that explicitly
+checks the ID card and dispatches the work.
+
+#+BEGIN_SRC elisp
+  (defun real-part-manager (z)
+    (cond ((rectangular-p z)
+           (real-part-rectangular (contents z)))
+          ((polar-p z)
+           (real-part-polar (contents z)))
+          (t (error "Unknown type -- REAL-PART"))))
+#+END_SRC
+
+*Why is this bad?*
+1. *Not Additive:* If Harry invents a new type, we have to edit
+     ~real-part-manager~ and add a new ~cond~ clause. We have to modify
+     the manager every time a worker changes.
+2. *Name Conflicts:* George and Martha both want to name their
+      function ~real-part~. They have to rename them to
+      ~real-part-rectangular~ and ~real-part-polar~ to avoid crashing.
+
+* Data-Directed Programming
+:PROPERTIES:
+  :CUSTOM_ID: data-directed-programming
+  :END:
+
+*The "Good" Way.*
+Instead of a Manager function with ~cond~ logic, we
+use a *Table*.  The Manager is replaced by a general algorithm that
+looks up _(Operation, Type)_ in a table.
+
+  | Operation / Type | Rectangular           | Polar           |
+  |------------------+-----------------------+-----------------|
+  | ~real-part~        | ~real-part-rectangular~ | ~real-part-polar~ |
+  | ~imag-part~        | ~imag-part-rectangular~ | ~imag-part-polar~ |
+  | ~magnitude~        | ~magnitude-rectangular~ | ~magnitude-polar~ |
+  | ~angle~            | ~angle-rectangular~     | ~angle-polar~     |
+
+ - *George's job:* Install his column (Rectangular).
+ - *Martha's job:* Install her column (Polar).
+ - *System's job:* Just do ~(lookup operation type)~.
+
+** Elisp: The Table Infrastructure
+
+Since Elisp doesn't have the global ~put~ and ~get~ exactly like
+the SICP Scheme environment, we will build a simple global table
+using a Hash Table.
+
+#+BEGIN_SRC elisp
+  ;; 1. The Global Table
+  (defvar *op-table* (make-hash-table :test 'equal)
+    "A 2D table storing operations indexed by (op type).")
+
+  ;; 2. PUT: Installs an operation in the table
+  (defun put (op type item)
+    "Store ITEM under key (OP TYPE)."
+    (puthash (list op type) item *op-table*))
+
+  ;; 3. GET: Retrieves an operation from the table
+  (defun get (op type)
+    "Retrieve item under key (OP TYPE)."
+    (gethash (list op type) *op-table*))
+#+END_SRC
+
+** Elisp: The Core apply-generic
+
+This is the heart of the system. It takes a generic operation name
+(like ~'real-part~) and an argument. It checks the argument's tag,
+looks in the table, and runs the function found there.
+
+#+BEGIN_SRC elisp
+  (defun apply-generic (op args)
+    "Apply generic operation OP to ARGS."
+    (let* ((type-tags (mapcar 'type-tag args)) ;; Get tags of all args
+           ;; Lookup the function in the table using (OP . TYPES)
+           ;; Note: Simplified for single argument dispatch first,
+           ;; but robust enough for list of types.
+           (proc (get op (car type-tags))))
+      (if proc
+          ;; If function found, apply it to the contents (stripped of tags)
+          (apply proc (mapcar 'contents args))
+        (error "No method for these types -- APPLY-GENERIC %s %s"
+               (list op type-tags)))))
+#+END_SRC
+
+* Part 4: Installing the Packages
+:PROPERTIES:
+:CUSTOM_ID: installing-packages
+:END:
+
+Now we simulate "George" and "Martha" installing their code into our
+system. Note that they can use local helper functions inside their
+install` function, keeping the global namespace clean.
+
+** The Rectangular Package (George)
+George uses internal logic:
+- Real Part: $x$
+- Imag Part: $y$
+- Magnitude: $\sqrt{x^2 + y^2}$
+- Angle: $\arctan(y, x)$
+
+#+BEGIN_SRC elisp
+  (defun install-rectangular-package ()
+    ;; Internal procedures (George's secrets)
+    (let ((real-part (lambda (z) (car z)))
+          (imag-part (lambda (z) (cdr z)))
+          (make-from-real-imag (lambda (x y) (cons x y)))
+          (magnitude (lambda (z)
+                       (sqrt (+ (* (car z) (car z))
+                                (* (cdr z) (cdr z))))))
+          (angle (lambda (z)
+                   (atan (cdr z) (car z)))))
+
+      ;; Interface to the rest of the system
+      (put 'real-part 'rectangular real-part)
+      (put 'imag-part 'rectangular imag-part)
+      (put 'magnitude 'rectangular magnitude)
+      (put 'angle 'rectangular angle)
+      (put 'make-from-real-imag 'rectangular
+           (lambda (x y) (attach-tag 'rectangular (funcall make-from-real-imag x y))))
+
+      'done-rectangular))
+#+END_SRC
+
+** The Polar Package (Martha)
+Martha uses internal logic:
+- Real Part: $r \cdot \cos(A)$
+- Imag Part: $r \cdot \sin(A)$
+- Magnitude: $r$
+- Angle: $A$
+
+#+BEGIN_SRC elisp
+  (defun install-polar-package ()
+    ;; Internal procedures (Martha's secrets)
+    (let ((magnitude (lambda (z) (car z)))
+          (angle (lambda (z) (cdr z)))
+          (make-from-mag-ang (lambda (r a) (cons r a)))
+          (real-part (lambda (z)
+                       (* (car z) (cos (cdr z)))))
+          (imag-part (lambda (z)
+                       (* (car z) (sin (cdr z))))))
+
+      ;; Interface
+      (put 'real-part 'polar real-part)
+      (put 'imag-part 'polar imag-part)
+      (put 'magnitude 'polar magnitude)
+      (put 'angle 'polar angle)
+      (put 'make-from-mag-ang 'polar
+           (lambda (r a) (attach-tag 'polar (funcall make-from-mag-ang r a))))
+      'done-polar))
+#+END_SRC
+
+* Part 5: The Generic Selectors (The User Interface)
+:PROPERTIES:
+  :CUSTOM_ID: generic-selectors
+  :END:
+
+Finally, we define the top-level functions that the user actually calls. These function just delegate everything to ~apply-generic~.
+
+#+BEGIN_SRC elisp
+  (defun real-part (z) (apply-generic 'real-part (list z)))
+  (defun imag-part (z) (apply-generic 'imag-part (list z)))
+  (defun magnitude (z) (apply-generic 'magnitude (list z)))
+  (defun angle (z)     (apply-generic 'angle (list z)))
+#+END_SRC
+
+And we need generic constructors (helpers to access the packages' constructors).
+
+#+BEGIN_SRC elisp
+  (defun make-complex-from-real-imag (x y)
+    (funcall (get 'make-from-real-imag 'rectangular) x y))
+
+  (defun make-complex-from-mag-ang (r a)
+    (funcall (get 'make-from-mag-ang 'polar) r a))
+#+END_SRC
+
+* Part 6: Running the Simulation
+  :PROPERTIES:
+  :CUSTOM_ID: running-simulation
+  :END:
+
+Execute this block to initialize everything and run the test.
+
+#+BEGIN_SRC elisp :results output
+     ;; 1. Install the packages
+     (install-rectangular-package)
+     (install-polar-package)
+
+     ;; 2. Create a Rectangular Number (3 + 4i)
+     (setq z1 (make-complex-from-real-imag 3 4))
+     (print (format "z1: %s" z1))
+
+     ;; 3. Create a Polar Number (Matches z1: Magnitude 5, Angle ~0.92)
+     (setq z2 (make-complex-from-mag-ang 5 0.9273))
+     (print (format "z2: %s" z2))
+
+     ;; 4. Use Generic Operations!
+     (print (format "Real part of z1 (Rect): %f" (real-part z1)))
+     (print (format "Real part of z2 (Polar): %f" (real-part z2)))
+
+     (print (format "Magnitude of z1 (Rect): %f" (magnitude z1)))
+     (print (format "Magnitude of z2 (Polar): %f" (magnitude z2)))
+#+END_SRC
+
+* Part 7: Message Passing (Alternative)
+
+
+:PROPERTIES:
+:CUSTOM_ID: message-passing
+:END:
+
+The lecture briefly mentions another strategy called *Message Passing*.
+Instead of a smart manager or a central table, the *data object itself*
+is a procedure.
+
+- You don't say ~(real-part z)~.
+- You say ~(z 'real-part)~. The object ~z~ receives the message
+  ~'real-part~ and decides what to do.
+
+This is the foundation of Object-Oriented Programming (like Smalltalk
+or Java objects).
+
+#+BEGIN_SRC elisp
+  (defun make-from-real-imag-mp (x y)
+    (lambda (op)
+      (cond ((eq op 'real-part) x)
+            ((eq op 'imag-part) y)
+            ((eq op 'magnitude) (sqrt (+ (* x x) (* y y))))
+            ((eq op 'angle) (atan y x))
+            (t (error "Unknown op -- MAKE-FROM-REAL-IMAG %s" op)))))
+
+  ;; Usage:
+  ;; (setq z (make-from-real-imag-mp 3 4))
+  ;; (funcall z 'magnitude) ;; => 5.0
+#+END_SRC
+
+* Deep Dive: Message Passing
+:PROPERTIES:
+:CUSTOM_ID: deep-dive-message-passing
+:END:
+
+In the "Data-Directed" approach (the Table method), we had a smart
+system and dumb data.
+
+  - *Data:* ~(rectangular 3 4)~ — just a list.
+  - *System:* Looked at the tag ~rectangular~, went to a big table, found the math function, and applied it.
+
+Message Passing flips this upside down.
+
+  - We stop distinguishing between "procedures" and "data".
+  - An object is just a procedure that represents a value.
+  - To get information from the object, you "send it a message" (call the function with a symbol).
+
+** The Anatomy of a "Smart Object"
+
+Let's dissect the ~make-from-real-imag-mp~ function to understand
+exactly how it works.
+
+#+BEGIN_SRC elisp
+  ;; 1. The Constructor
+  (defun make-from-real-imag-mp (x y)
+
+    ;; 2. The Closure (The "Private" Memory)
+    ;; At this moment, 'x' and 'y' are bound.
+    ;; Even after this function finishes, the lambda below
+    ;; will "remember" these specific x and y values.
+
+    ;; 3. The Dispatcher (The Returned Object)
+    (lambda (op)
+      (cond ((eq op 'real-part) x)
+            ((eq op 'imag-part) y)
+            ((eq op 'magnitude) (sqrt (+ (* x x) (* y y))))
+            ((eq op 'angle) (atan y x))
+            (t (error "Unknown op -- %s" op)))))
+#+END_SRC
+
+- *Encapsulation:* Notice that ~x~ and ~y~ are never returned to the outside
+  world. There is *no way* for a user to change ~x~ or ~y~ directly. They
+  are protected inside the function. This is exactly what "private
+  variables" are in Java or C++.
+- *The "Object":* The thing returned is a function. In Lisp, *everything*
+  is a value, including functions.
+
+** Polymorphism in Action (George vs Martha)
+To really see why this is powerful, we need two different "classes" of
+objects behaving differently to the same message.
+
+Let's implement "Martha's" Polar objects using Message Passing.
+
+#+BEGIN_SRC elisp
+  ;; Martha's Polar Object
+  ;; Stored internally as Radius (r) and Angle (a)
+  (defun make-from-mag-ang-mp (r a)
+    (lambda (op)
+      (cond ((eq op 'magnitude) r)
+            ((eq op 'angle) a)
+            ((eq op 'real-part) (* r (cos a)))
+            ((eq op 'imag-part) (* r (sin a)))
+            (t (error "Unknown op -- POLAR %s" op)))))
+#+END_SRC
+
+Now, look at how the user interacts with them. The user sends the *same
+message* (~'real-part~), but the objects execute *different algorithms*.
+
+#+BEGIN_SRC elisp :results output
+  ;; 1. Create two different "objects"
+  (setq obj-rectangular (make-from-real-imag-mp 3 4))
+  (setq obj-polar       (make-from-mag-ang-mp 5 0.93))
+
+  ;; 2. Send the same message to both
+  (print (funcall obj-rectangular 'real-part))
+  ;; => Returns x (3) directly
+
+  (print (funcall obj-polar 'real-part))
+  ;; => Calculates (* r (cos a))
+
+  ;; The user doesn't need to check types! The object knows what to do.
+#+END_SRC
+
+** Comparison: Generic Operators vs Message Passing
+
+| Feature             | Data-Directed (Table)                                 | Message Passing (Objects)                                                         |
+| :---                | :---                                                  | :---                                                                              |
+| *Who decides?**       | The central ~apply-generic~ function looks up the rule. | The object itself decides how to handle the request.                              |
+| *Data format**        | Transparent Lists ~('rectangular 3 4)~                  | Opaque Functions (Closures)                                                       |
+| *Adding types**       | Easy (Add column to table).                           | Easy (Write a new constructor).                                                   |
+| *Adding operations**  | Easy (Add row to table).                              | **Hard.** You must edit every single object constructor to add a new `cond` clause. |
+
+** Why is this called "Object Oriented"?
+
+This pattern is the grandfather of OOP.
+
+If you use Python:
+#+BEGIN_SRC python
+  # Python syntax
+  z.real_part()
+#+END_SRC
+
+If you use Lisp Message Passing:
+#+BEGIN_SRC elisp
+  ;; Lisp syntax
+  (funcall z 'real-part)
+#+END_SRC
+
+It is structurally identical. The object ~z~ receives the selector
+~real_part~ and executes the corresponding method.
+
+** Advanced Note: Lexical Binding in Emacs
+
+Important Technical Detail: For the code above to work as a true
+closure in Emacs Lisp (where ~x~ and ~y~ are remembered), you usually need
+*Lexical Binding* enabled.
+
+In older Elisp (dynamic binding), the lambda might not "capture" ~x~ and
+~y~ correctly once the constructor finishes.
+
+To ensure this works in your test files, always add this as the very
+first line of your generic `.el` or `.org` file:
+
+~;;; -*- lexical-binding: t -*-~
+
+Or, if you are just testing in a code block, use ~lexical-let~ (if using
+the older `cl` package) or simply rely on the fact that modern Emacs
+(v29+) defaults to lexical binding in many contexts.
