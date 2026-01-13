@@ -100,11 +100,12 @@ checks the ID card and dispatches the work.
 
 *Why is this bad?*
 1. *Not Additive:* If Harry invents a new type, we have to edit
-     ~real-part-manager~ and add a new ~cond~ clause. We have to modify
-     the manager every time a worker changes.
+   ~real-part-manager~ and add a new ~cond~ clause. We have to modify
+   the manager every time a worker changes.
+
 2. *Name Conflicts:* George and Martha both want to name their
-      function ~real-part~. They have to rename them to
-      ~real-part-rectangular~ and ~real-part-polar~ to avoid crashing.
+   function ~real-part~. They have to rename them to
+   ~real-part-rectangular~ and ~real-part-polar~ to avoid crashing.
 
 * Data-Directed Programming
 :PROPERTIES:
@@ -130,8 +131,7 @@ looks up _(Operation, Type)_ in a table.
 ** Elisp: The Table Infrastructure
 
 Since Elisp doesn't have the global ~put~ and ~get~ exactly like
-the SICP Scheme environment, we will build a simple global table
-using a Hash Table.
+the SICP Scheme environment, we will build a simple global table using a Hash Table.
 
 #+BEGIN_SRC elisp
   ;; 1. The Global Table
@@ -148,6 +148,9 @@ using a Hash Table.
     "Retrieve item under key (OP TYPE)."
     (gethash (list op type) *op-table*))
 #+END_SRC
+
+#+RESULTS:
+: get
 
 ** Elisp: The Core apply-generic
 
