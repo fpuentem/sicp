@@ -1,0 +1,200 @@
+#+TITLE: Lecture 1A: Overview and Introduction to Lisp
+#+AUTHOR: Fabricio Puente M.
+#+DATE: <2026-01-18 Sun>
+#+STARTUP: indent overview
+#+PROPERTY: header-args:elisp :lexical t
+
+* Introduction: Computer Science is not about Computers
+:PROPERTIES:
+:CUSTOM_ID: introduction
+:END:
+
+Professor Abelson begins with a bold claim: Computer Science is not
+really about computers, just as Geometry is not really about surveying
+instruments.
+
+ * *Geometry* (in ancient Egypt) was about measuring the earth. Later,
+   it became a way to formalize "Declarative Knowledge" (what is
+   true).
+
+ * *Computer Science* is about formalizing "Imperative Knowledge" (how
+   to do something).
+
+ *The Core Challenge:* The constraints in software are not physical
+ (like gravity or tolerance in civil engineering); they are the
+ limitations of our own minds. We manage this complexity using
+ *Abstraction*.
+
+* Concept 1: Declarative vs. Imperative Knowledge
+:PROPERTIES:
+:CUSTOM_ID: declarative-vs-imperative
+:END:
+
+To understand Lisp, we must distinguish between defining what
+something *is* versus defining *how to find* it.
+
+*Mathematical Definition (Declarative):*
+$\sqrt{x} = y$ such that $y^2 = x$ and $y > 0$.
+- This tells us the property of the square root.
+- It does NOT tell us how to calculate it.
+
+*Algorithmic Definition (Imperative - Heron's Method):*
+To find $\sqrt{x}$:
+1. Make a guess $G$.
+2. Improve the guess by averaging $G$ and $x/G$.
+3. Keep improving until the guess is good enough.
+
+*We use Lisp to express these "Spells" (Procedures) that control the
+"Spirits" (Processes).*
+
+* Concept 2: The Structure of Lisp
+  :PROPERTIES:
+  :CUSTOM_ID: structure-of-lisp
+  :END:
+
+  When learning any new language, ask three questions:
+  1.  **Primitives:** What are the simplest things? (Numbers, arithmetic).
+  2.  **Means of Combination:** How do we put them together? (Nested Lists).
+  3.  **Means of Abstraction:** How do we name things to use them as elements later? (`defun`, `defvar`).
+
+** 1. Primitives & Combinations
+   Lisp uses **Prefix Notation** (operator first). This eliminates ambiguity and the need for operator precedence rules (like PEMDAS).
+
+   #+BEGIN_SRC elisp :results output
+     ;; Primitive Data
+     (print 486)
+
+     ;; Primitive Procedure (Combinations)
+     (print (+ 137 349))
+     (print (- 1000 334))
+     (print (* 5 99))
+     (print (/ 10 5))
+
+     ;; Nested Combinations (The Tree Structure)
+     ;; (+ (* 3 5) (- 10 6))
+     ;; This represents a tree of operations.
+     (print (+ (* 3 5)
+               (- 10 6)))
+   #+END_SRC
+
+** 2. Abstraction (Naming)
+   In Elisp, we define functions using ~defun~ (Define Function) and variables using ~defvar~ or ~setq~. This allows us to suppress detail. Once we define ~square~, we don't need to know *how* it works, only *what* it does.
+
+   #+BEGIN_SRC elisp :results output
+     ;; Defining a procedure (Abstraction)
+     (defun square (x)
+       (* x x))
+
+     ;; Using the abstraction
+     (print (square 21))         ;; 441
+     (print (square (+ 2 5)))    ;; (square 7) -> 49
+     (print (square (square 3))) ;; (square 9) -> 81
+   #+END_SRC
+
+* Concept 3: Case Analysis (Making Decisions)
+  :PROPERTIES:
+  :CUSTOM_ID: case-analysis
+  :END:
+
+  We need to perform different actions based on tests.
+  - **Cond:** The general case analysis (multi-branch).
+  - **If:** A specific case analysis (binary branch).
+
+  *Example: Absolute Value $|x|$*
+  $|x| = x$ if $x > 0$
+  $|x| = 0$ if $x = 0$
+  $|x| = -x$ if $x < 0$
+
+  #+BEGIN_SRC elisp
+    ;; Using COND (General case)
+    (defun my-abs-cond (x)
+      (cond ((> x 0) x)
+            ((= x 0) 0)
+            ((< x 0) (- x))))
+
+    ;; Using IF (Binary case)
+    (defun my-abs-if (x)
+      (if (< x 0)
+          (- x)
+        x))
+  #+END_SRC
+
+* The Main Example: Newton's Method for Square Roots
+  :PROPERTIES:
+  :CUSTOM_ID: newton-sqrt
+  :END:
+
+  This is the highlight of the lecture. It demonstrates how to translate the Imperative "Heron's Method" directly into code.
+
+  *Key Difficulty:* Note that ~try-guess~ calls ~improve~, and ~try-guess~ also calls *itself* (Recursion). This creates a loop without using `for` or `while`.
+
+** Step 1: The Logic
+   We define the logic exactly as Heron described it.
+
+   #+BEGIN_SRC elisp
+     (defun sqrt-iter (guess x)
+       (if (good-enough-p guess x)
+           guess
+         (sqrt-iter (improve guess x) x)))
+   #+END_SRC
+
+** Step 2: The Helpers
+   We must define what "Improve" and "Good Enough" mean.
+   - **Improve:** Average $guess$ and $x/guess$.
+   - **Good Enough:** Is $guess^2$ close to $x$?
+
+   #+BEGIN_SRC elisp
+     (defun improve (guess x)
+       (average guess (/ x guess)))
+
+     (defun average (x y)
+       (/ (+ x y) 2.0))
+
+     (defun good-enough-p (guess x)
+       (< (abs (- (square guess) x)) 0.001))
+
+     (defun square (x) (* x x))
+   #+END_SRC
+
+** Step 3: The Wrapper
+   We define the top-level function `my-sqrt` that kicks off the process with an initial guess (usually 1.0).
+
+   #+BEGIN_SRC elisp :results output
+     (defun my-sqrt (x)
+       (sqrt-iter 1.0 x))
+
+     ;; Test it
+     (print (format "Sqrt of 9: %f" (my-sqrt 9)))
+     (print (format "Sqrt of 2: %f" (my-sqrt 2)))
+   #+END_SRC
+
+* Advanced: Block Structure (Hiding Details)
+  :PROPERTIES:
+  :CUSTOM_ID: block-structure
+  :END:
+
+  In the code above, helper functions like ~improve~ and ~good-enough-p~ clutter the global namespace. If "Harry" writes a cube-root program, his ~improve~ function might conflict with ours.
+
+  We can nest definitions *inside* the main function. This is **Block Structure**.
+  *Note:* In Elisp, we use `cl-flet` or `let` for local functions, as standard `defun` inside a function is still global.
+
+  #+BEGIN_SRC elisp :results output
+    (require 'cl-lib)
+
+    (defun my-sqrt-block (x)
+      (cl-labels
+          ((good-enough-p (guess)
+             (< (abs (- (square guess) x)) 0.001))
+           (improve (guess)
+             (average guess (/ x guess)))
+           (sqrt-iter (guess)
+             (if (good-enough-p guess)
+                 guess
+               (sqrt-iter (improve guess)))))
+        ;; Start the internal loop
+        (sqrt-iter 1.0)))
+
+    (print (format "Block Sqrt of 16: %f" (my-sqrt-block 16)))
+  #+END_SRC
+
+  *Why is this important?* Notice that ~good-enough-p~ inside the block doesn't need `x` passed to it. It can "see" the `x` from the outer `my-sqrt-block`. This is **Lexical Scoping**, a powerful way to simplify code.
