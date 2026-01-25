@@ -48,85 +48,104 @@ To find $\sqrt{x}$:
 "Spirits" (Processes).*
 
 * Concept 2: The Structure of Lisp
-  :PROPERTIES:
+:PROPERTIES:
   :CUSTOM_ID: structure-of-lisp
   :END:
 
-  When learning any new language, ask three questions:
-  1.  **Primitives:** What are the simplest things? (Numbers, arithmetic).
-  2.  **Means of Combination:** How do we put them together? (Nested Lists).
-  3.  **Means of Abstraction:** How do we name things to use them as elements later? (`defun`, `defvar`).
+When learning any new language, ask three questions:
 
-** 1. Primitives & Combinations
-   Lisp uses **Prefix Notation** (operator first). This eliminates ambiguity and the need for operator precedence rules (like PEMDAS).
+1. *Primitives:* What are the simplest things? (Numbers, arithmetic).
+2. *Means of Combination:* How do we put them together? (Nested Lists).
+3. *Means of Abstraction:* How do we name things to use them as elements
+   later? (~defun~, ~defvar~).
 
-   #+BEGIN_SRC elisp :results output
-     ;; Primitive Data
-     (print 486)
+** Primitives & Combinations
+Lisp uses *Prefix Notation* (operator first). This eliminates
+ambiguity and the need for operator precedence rules (like PEMDAS).
 
-     ;; Primitive Procedure (Combinations)
-     (print (+ 137 349))
-     (print (- 1000 334))
-     (print (* 5 99))
-     (print (/ 10 5))
+#+BEGIN_SRC elisp :results output
+  ;; Primitive Data
+  (print 486)
 
-     ;; Nested Combinations (The Tree Structure)
-     ;; (+ (* 3 5) (- 10 6))
-     ;; This represents a tree of operations.
-     (print (+ (* 3 5)
-               (- 10 6)))
-   #+END_SRC
+  ;; Primitive Procedure (Combinations)
+  (print (+ 137 349))
+  (print (- 1000 334))
+  (print (* 5 99))
+  (print (/ 10 5))
 
-** 2. Abstraction (Naming)
-   In Elisp, we define functions using ~defun~ (Define Function) and variables using ~defvar~ or ~setq~. This allows us to suppress detail. Once we define ~square~, we don't need to know *how* it works, only *what* it does.
+  ;; Nested Combinations (The Tree Structure)
+  ;; (+ (* 3 5) (- 10 6))
+  ;; This represents a tree of operations.
+  (print (+ (* 3 5)
+            (- 10 6)))
+#+END_SRC
 
-   #+BEGIN_SRC elisp :results output
-     ;; Defining a procedure (Abstraction)
-     (defun square (x)
-       (* x x))
+#+RESULTS:
 
-     ;; Using the abstraction
-     (print (square 21))         ;; 441
-     (print (square (+ 2 5)))    ;; (square 7) -> 49
-     (print (square (square 3))) ;; (square 9) -> 81
-   #+END_SRC
+** Abstraction (Naming)
+In Elisp, we define functions using ~defun~ (Define Function) and
+variables using ~defvar~ or ~setq~. This allows us to suppress
+detail. Once we define ~square~, we don't need to know *how* it works,
+only *what* it does.
+
+#+BEGIN_SRC elisp :results output
+  ;; Defining a procedure (Abstraction)
+  (defun square (x)
+    (* x x))
+
+  ;; Using the abstraction
+  (print (square 21))         ;; 441
+  (print (square (+ 2 5)))    ;; (square 7) -> 49
+  (print (square (square 3))) ;; (square 9) -> 81
+#+END_SRC
+
+#+RESULTS:
+:
+: 441
+:
+: 49
+:
+: 81
 
 * Concept 3: Case Analysis (Making Decisions)
-  :PROPERTIES:
+:PROPERTIES:
   :CUSTOM_ID: case-analysis
   :END:
 
-  We need to perform different actions based on tests.
-  - **Cond:** The general case analysis (multi-branch).
-  - **If:** A specific case analysis (binary branch).
+We need to perform different actions based on tests.
+- *Cond:* The general case analysis (multi-branch).
+- *If:* A specific case analysis (binary branch).
 
-  *Example: Absolute Value $|x|$*
+*Example: Absolute Value $|x|$*
   $|x| = x$ if $x > 0$
   $|x| = 0$ if $x = 0$
   $|x| = -x$ if $x < 0$
 
-  #+BEGIN_SRC elisp
-    ;; Using COND (General case)
-    (defun my-abs-cond (x)
-      (cond ((> x 0) x)
-            ((= x 0) 0)
-            ((< x 0) (- x))))
+#+BEGIN_SRC elisp
+  ;; Using COND (General case)
+  (defun my-abs-cond (x)
+    (cond ((> x 0) x)
+          ((= x 0) 0)
+          ((< x 0) (- x))))
 
-    ;; Using IF (Binary case)
-    (defun my-abs-if (x)
-      (if (< x 0)
-          (- x)
-        x))
-  #+END_SRC
+  ;; Using IF (Binary case)
+  (defun my-abs-if (x)
+    (if (< x 0)
+        (- x)
+      x))
+#+END_SRC
 
 * The Main Example: Newton's Method for Square Roots
-  :PROPERTIES:
+:PROPERTIES:
   :CUSTOM_ID: newton-sqrt
   :END:
 
-  This is the highlight of the lecture. It demonstrates how to translate the Imperative "Heron's Method" directly into code.
+This is the highlight of the lecture. It demonstrates how to translate
+the Imperative "Heron's Method" directly into code.
 
-  *Key Difficulty:* Note that ~try-guess~ calls ~improve~, and ~try-guess~ also calls *itself* (Recursion). This creates a loop without using `for` or `while`.
+*Key Difficulty:* Note that ~try-guess~ calls ~improve~, and ~try-guess~ also
+calls *itself* (Recursion). This creates a loop without using ~for~ or
+~while~.
 
 ** Step 1: The Logic
    We define the logic exactly as Heron described it.
@@ -169,14 +188,14 @@ To find $\sqrt{x}$:
    #+END_SRC
 
 * Advanced: Block Structure (Hiding Details)
-  :PROPERTIES:
+:PROPERTIES:
   :CUSTOM_ID: block-structure
   :END:
 
-  In the code above, helper functions like ~improve~ and ~good-enough-p~ clutter the global namespace. If "Harry" writes a cube-root program, his ~improve~ function might conflict with ours.
+In the code above, helper functions like ~improve~ and ~good-enough-p~ clutter the global namespace. If "Harry" writes a cube-root program, his ~improve~ function might conflict with ours.
 
-  We can nest definitions *inside* the main function. This is **Block Structure**.
-  *Note:* In Elisp, we use `cl-flet` or `let` for local functions, as standard `defun` inside a function is still global.
+We can nest definitions *inside* the main function. This is **Block Structure**.
+*Note:* In Elisp, we use `cl-flet` or `let` for local functions, as standard `defun` inside a function is still global.
 
   #+BEGIN_SRC elisp :results output
     (require 'cl-lib)
