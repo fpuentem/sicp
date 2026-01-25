@@ -1,0 +1,219 @@
+#+TITLE: Lecture 5B: Computational Objects & Mutability
+#+AUTHOR: Fabricio Puente M.
+#+DATE: <2026-01-24 Sat>
+#+STARTUP: indent overview
+#+PROPERTY: header-args:elisp :lexical t
+
+* Configuration: Enable Lexical Binding
+:PROPERTIES:
+:CUSTOM_ID: config
+:END:
+
+*CRITICAL:* This lecture relies entirely on *Closures* (procedures that
+remember their environment). You must enable Lexical Binding for
+this code to work in Emacs Lisp.
+
+1. If running inside this Org buffer, the property line above handles
+   it.
+2. If copying to a ~.el~ file, the first line must be:
+   ~;;; -*- lexical-binding: t -*-~
+
+* The Digital Logic Simulator
+:PROPERTIES:
+:CUSTOM_ID: digital-logic
+:END:
+
+Sussman builds a simulator for digital circuits to demonstrate how
+"Objects" in the computer correspond to "Objects" in the real world.
+
+- *Real World:* An electrical wire has a voltage (State). If the voltage
+  changes, it propagates to the connected gate.
+- *Computer Model:* A ~wire~ object has a local variable
+  ~signal-value~. If it changes, it calls a list of
+  ~action-procedures~.
+
+** The Wire (An Object with State)
+A wire is not just a value; it's a *dispatcher*. It is a procedure
+that accepts messages like ~'get-signal~ or ~'set-signal!~.
+
+#+BEGIN_SRC elisp
+  (defun make-wire ()
+    (let ((signal-value 0)
+          (action-procedures '()))
+
+      (defun set-my-signal! (new-value)
+        (if (not (= signal-value new-value))
+            (progn
+              (setq signal-value new-value)
+              (call-each action-procedures))
+          'done))
+
+      (defun accept-action-procedure! (proc)
+        (setq action-procedures (cons proc action-procedures))
+        (funcall proc)) ;; Run once immediately
+
+      (defun dispatch (m)
+        (cond ((eq m 'get-signal) signal-value)
+              ((eq m 'set-signal!) #'set-my-signal!)
+              ((eq m 'add-action!) #'accept-action-procedure!)
+              (t (error "Unknown operation -- WIRE"))))
+
+      #'dispatch))
+
+  ;; Helper functions for syntax sugar
+  (defun get-signal (wire) (funcall wire 'get-signal))
+  (defun set-signal! (wire new-val) (funcall (funcall wire 'set-signal!) new-val))
+  (defun add-action! (wire action-proc) (funcall (funcall wire 'add-action!) action-proc))
+
+  (defun call-each (procedures)
+    (dolist (proc procedures)
+      (funcall proc)))
+#+END_SRC
+
+#+RESULTS:
+: call-each
+
+** The Gates (Connecting Objects)
+Gates (like Inverters) don't have "state" themselves; they just listen
+to input wires and talk to output wires.
+
+*Key Concept:* The ~inverter~ function doesn't return anything useful. Its
+purpose is the *Side Effect* of wiring the two objects together.
+
+ #+BEGIN_SRC elisp
+   (defvar *the-agenda* nil) ;; Placeholder for the scheduler (Part 2)
+   (defvar *inverter-delay* 2)
+   (defvar *and-gate-delay* 3)
+
+   (defun inverter (input output)
+     (defun invert-input ()
+       (let ((new-value (logical-not (get-signal input))))
+         (after-delay *inverter-delay*
+                      (lambda ()
+                        (set-signal! output new-value)))))
+
+     ;; Tell the input wire: "Wake me up if you change!"
+     (add-action! input #'invert-input)
+     'ok)
+
+   (defun logical-not (s)
+     (if (= s 0) 1 0))
+
+   ;; Fake 'after-delay' for demonstration (real one requires a Queue)
+   (defun after-delay (delay action)
+     (print (format "Plan: In %d seconds, do action..." delay))
+     (funcall action))
+#+END_SRC
+
+* Mutability and Identity
+:PROPERTIES:
+:CUSTOM_ID: mutability-identity
+:END:
+
+Once we introduce assignment (~setq~ or ~set-car!~), variables become "Places" rather than just values. This creates the problem of *Identity*.
+
+  * *Sharing:* Two lists share the same tail.
+  * *Aliasing:* Two names refer to the exact same object in memory.
+
+** The "Fingernail" Analogy
+- If I cut my fingernail, *I* change. Anyone looking at *me* sees the change.
+- If ~x~ and ~y~ are just copies of the number ~3~, changing ~x~ doesn't hurt ~y~.
+- If ~x~ and ~y~ point to the *same pair*, changing ~x~ changes ~y~.
+
+#+BEGIN_SRC elisp :results output
+  (setq x (list 'a 'b))     ;; ('a 'b nil)
+  (setq z1 (cons x x))      ;; z1 shares structure!
+
+  (print z1) ;; ((a b) a b)
+
+  ;; Mutation!
+  (setcar (car z1) 'boom)
+
+  (print z1) ;; ((boom b) boom b) -> Both parts changed!
+  (print x)  ;; (boom b) -> Original x changed!
+#+END_SRC
+
+#+RESULTS:
+:
+: ((a b) a b)
+:
+: ((boom b) boom b)
+:
+: (boom b)
+
+* Alonzo Church's Hack (Deep Theory)
+:PROPERTIES:
+:CUSTOM_ID: church-hack
+:END:
+
+Sussman asks: "Do we really need primitive data structures like lists?
+Or is ~lambda~ enough?"
+
+Alonzo Church (inventor of Lambda Calculus) proved that we don't need
+data. We can simulate data using only functions.
+
+** Pure Functional Cons (The Standard Hack)
+A pair is just a function that waits for a "Picker" (~m~) and gives it ~x~ and ~y~.
+
+#+BEGIN_SRC elisp :results output
+  (defun church-cons (x y)
+    (lambda (m) (funcall m x y)))
+
+  (defun church-car (z)
+    (funcall z (lambda (p q) p)))
+
+  (defun church-cdr (z)
+    (funcall z (lambda (p q) q)))
+
+  ;; Usage
+  (setq c (church-cons 10 20))
+  (print (church-car c)) ;; 10
+#+END_SRC
+
+** Mutable Cons (The "Permission" Hack)
+*This is the hardest part of the lecture.*
+
+Sussman shows how to implement ~set-car!~ and ~set-cdr!~ using the
+functional Church cons.
+
+*The Trick:* The internal lambda accepts ~x~ and ~y~ (the values) AND two
+"Permission" functions (~set-x!~ and ~set-y!~).
+
+#+BEGIN_SRC elisp :results output
+  (defun mutable-cons (x y)
+    ;; We return a Dispatcher 'm'
+    (lambda (m)
+      (funcall m
+               x
+               y
+               ;; Permission 1: Allow changing X
+               (lambda (new-x) (setq x new-x))
+               ;; Permission 2: Allow changing Y
+               (lambda (new-y) (setq y new-y)))))
+
+  (defun mutable-car (z)
+    ;; We pass a lambda that takes 4 args, but only returns x (the first)
+    (funcall z (lambda (x y sx sy) x)))
+
+  (defun mutable-set-car! (z new-val)
+    ;; We pass a lambda that takes 4 args...
+    ;; x, y, setter-x, setter-y
+    ;; And we USE setter-x!
+    (funcall z (lambda (x y sx sy) (funcall sx new-val))))
+
+  ;; Demonstration
+  (setq m (mutable-cons 100 200))
+  (print (format "Before: %d" (mutable-car m)))
+
+  (mutable-set-car! m 999)
+  (print (format "After: %d" (mutable-car m)))
+#+END_SRC
+
+* Summary of Key Insights
+1. *Object-Oriented Programming* in Lisp is just "Closures +
+   Dispatching". You don't need classes to have objects.
+2. *Simulation* requires a model of Time (Agenda) and Events.
+3. *Assignmeppnt (~set!~)* is powerful but dangerous because it introduces
+   time and identity issues (bugs caused by aliasing).
+4. *Metalinguistic Abstraction:* We can implement the rules of data
+   (cons/car/cdr) purely in terms of the rules of procedures (lambda).
