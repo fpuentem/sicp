@@ -1,0 +1,252 @@
+#+TITLE: Lecture 6A: Streams and Lazy Evaluation
+#+AUTHOR: Fabricio Puente  M.
+#+DATE: <2026-02-01 Sun>
+#+STARTUP: indent overview
+#+PROPERTY: header-args:elisp :lexical t
+
+* Configuration: Enable Lexical Binding
+:PROPERTIES:
+:CUSTOM_ID: config-lexical
+:END:
+
+*CRITICAL:* Streams rely entirely on *Closures* (procedures that capture their environment) and *Macros*.
+You must ensure Lexical Binding is enabled.
+
+1. If running inside this Org buffer, the header property above handles it.
+2. If copying to a file, add this as the first line:
+   ~;;; -*- lexical-binding: t -*-~
+
+* Part 1: The Signal Processing View
+:PROPERTIES:
+:CUSTOM_ID: signal-processing
+:END:
+
+*The Problem:*
+In previous lectures, we saw two ways to process data:
+1. *Lists:* Easy to reason about (map, filter), but inefficient. If you
+   want the 2nd prime between 10,000 and 1,000,000, a List approach
+   calculates *all* primes first, then picks the second. That creates a
+   huge list in memory.
+2. *Loops/Assignment:* Efficient (stops when it finds the answer), but
+   ugly code. It mixes up the logic of "generating numbers," "testing
+   primality," and "counting."
+
+*The Solution: Streams*
+A Stream looks like a List, but it computes itself *on demand*.
+- You can ask for the "Integers from 1 to Infinity."
+- The computer only calculates the number `1`.
+- It gives you a "Promise" to calculate `2` if you ever ask for it.
+
+* Part 2: Implementing Laziness (The Primitives)
+:PROPERTIES:
+:CUSTOM_ID: primitives
+:END:
+
+In Lisp, arguments are usually evaluated *before* the function runs. To
+create a stream, we need to stop evaluation. We do this with `delay`
+and `force`.
+
+- *Delay:* Stops a computation and packages it into a "Promise" (a function).
+- *Force:* Runs the promise to get the actual value.
+
+** 2.1 The Memoization Logic (The Engine)
+We don't just want to delay; we want to remember the result so we
+don't calculate it twice. This is called "Memoization".
+
+#+BEGIN_SRC elisp :results silent
+  (defun memo-proc (proc)
+    "Return a procedure that runs PROC only once and caches the result."
+    (let ((already-run nil)
+          (result nil))
+      (lambda ()
+        (if (not already-run)
+            (progn
+              (setq result (funcall proc))
+              (setq already-run t)
+              result)
+          result))))
+#+END_SRC
+
+** 2.2 The Macros (The Syntax)
+We need a macro for `delay` because `(delay (+ 1 1))` must NOT run `(+
+1 1)` immediately.  We need a macro for `cons-stream` for the same
+reason.
+
+#+BEGIN_SRC elisp :results silent
+  (defmacro delay (exp)
+    "Wrap EXP in a lambda and memoize it. DO NOT EVALUATE EXP YET."
+      `(memo-proc (lambda () ,exp)))
+
+  (defun force (promise)
+    "Run the promise."
+    (funcall promise))
+
+  (defmacro cons-stream (a b)
+    "Create a pair where B is delayed."
+    `(cons ,a (delay ,b)))
+#+END_SRC
+
+** 2.3 The Selectors
+Now we can define ~head~ (car) and `tail` (cdr) for streams.
+
+#+BEGIN_SRC elisp :results silent
+  (defun stream-car (s)
+    (car s))
+
+  (defun stream-cdr (s)
+    (force (cdr s))) ;; The magic happens here: We FORCE the rest to exist.
+
+  (defun stream-null-p (s)
+    (null s))
+
+  (defvar the-empty-stream nil)
+#+END_SRC
+
+* Part 3: Basic Stream Operations
+  :PROPERTIES:
+  :CUSTOM_ID: operations
+  :END:
+
+  Now we rebuild standard list tools (`ref`, `map`, `filter`) for streams.
+
+** 3.1 Stream Reference
+   Get the Nth item.
+
+   #+BEGIN_SRC elisp :results silent
+     (defun stream-ref (s n)
+       (if (= n 0)
+           (stream-car s)
+         (stream-ref (stream-cdr s) (1- n))))
+   #+END_SRC
+
+** 3.2 Stream Map
+   Apply a function to a stream. Note that the recursive call is inside `cons-stream`, so it is *delayed*. This allows mapping over infinite lists!
+
+   #+BEGIN_SRC elisp :results silent
+     (defun stream-map (proc s)
+       (if (stream-null-p s)
+           the-empty-stream
+         (cons-stream
+          (funcall proc (stream-car s))        ;; Compute head NOW
+          (stream-map proc (stream-cdr s)))))  ;; Compute tail LATER
+   #+END_SRC
+
+** 3.3 Stream Filter
+   This is the powerful part. The filter "tugs" on the input stream until it finds a match.
+
+   #+BEGIN_SRC elisp :results silent
+     (defun stream-filter (pred s)
+       (cond ((stream-null-p s) the-empty-stream)
+             ((funcall pred (stream-car s))
+              (cons-stream (stream-car s)
+                           (stream-filter pred (stream-cdr s))))
+             (t
+              ;; If predicate fails, skip this item and try the next immediately
+              (stream-filter pred (stream-cdr s)))))
+   #+END_SRC
+
+* Part 4: Infinite Streams
+  :PROPERTIES:
+  :CUSTOM_ID: infinite-streams
+  :END:
+
+  We can now define data structures that are infinitely long.
+
+** 4.1 Integers
+   A function that returns a stream of integers starting from `n`.
+
+   #+BEGIN_SRC elisp :results silent
+     (defun integers-starting-from (n)
+       (cons-stream n (integers-starting-from (1+ n))))
+
+     (defvar integers (integers-starting-from 1))
+   #+END_SRC
+
+   *Test It:* If we run this, it won't crash. It just creates `(1 . #<closure>)`.
+
+   #+BEGIN_SRC elisp :results output
+     (print (format "First: %d" (stream-ref integers 0)))
+     (print (format "Second: %d" (stream-ref integers 1)))
+     (print (format "100th: %d" (stream-ref integers 100)))
+   #+END_SRC
+
+* Part 5: The Prime Number Sieve
+  :PROPERTIES:
+  :CUSTOM_ID: sieve
+  :END:
+
+  This is the classic example of stream elegance. We want to find prime numbers.
+
+  **Algorithm (Sieve of Eratosthenes):**
+  1. Start with integers starting from 2.
+  2. Take the first number (2). It is Prime.
+  3. Filter the *rest* of the stream to remove anything divisible by 2.
+  4. Repeat with the next available number.
+
+   #+BEGIN_SRC elisp :results silent
+     (defun divisible-p (x y)
+       (= (mod x y) 0))
+
+     (defun sieve (s)
+       (cons-stream
+        (stream-car s) ;; The first number is prime
+        (sieve
+         (stream-filter
+          (lambda (x) (not (divisible-p x (stream-car s))))
+          (stream-cdr s)))))
+
+     (defvar primes (sieve (integers-starting-from 2)))
+   #+END_SRC
+
+** Running the Sieve
+   This code is "declarative". We described *what* a prime stream is. The computer calculates them one by one only when we ask.
+
+   #+BEGIN_SRC elisp :results output
+     (print (format "Prime 1: %d" (stream-ref primes 0))) ;; 2
+     (print (format "Prime 10: %d" (stream-ref primes 9))) ;; 29
+     (print (format "Prime 50: %d" (stream-ref primes 49))) ;; 229
+   #+END_SRC
+
+* Part 6: Defining Streams Implicitly (Advanced)
+  :PROPERTIES:
+  :CUSTOM_ID: implicit-definition
+  :END:
+
+  We can define a stream in terms of itself.
+
+  **Example: Ones**
+  The stream of `ones` is a `1`, followed by the stream of `ones`.
+  ~ones = (cons 1 (delay ones))~
+
+   #+BEGIN_SRC elisp :results output
+     (defvar ones (cons-stream 1 ones))
+
+     ;; Add two streams together
+     (defun add-streams (s1 s2)
+       (if (stream-null-p s1)
+           s2
+         (cons-stream (+ (stream-car s1) (stream-car s2))
+                      (add-streams (stream-cdr s1) (stream-cdr s2)))))
+
+     (print (format "One: %d" (stream-ref ones 500)))
+   #+END_SRC
+
+  **Example: Fibonacci Numbers**
+  Fibonacci is: 0, 1, ...
+  The rest is generated by adding the stream to its own tail.
+
+   #+BEGIN_SRC elisp :results output
+     ;; fibs: 0 1 1 2 3 5 ...
+     ;; rest: 1 1 2 3 5 8 ...
+     (defvar fibs
+       (cons-stream 0
+                    (cons-stream 1
+                                 (add-streams (stream-cdr fibs) fibs))))
+
+     (print (format "Fib 10: %d" (stream-ref fibs 10)))
+   #+END_SRC
+
+* Summary
+1. *Streams* decouple the "description" of a process from the "execution" of the process.
+2. We use *Delay* (Memoized Lambda) and **Force** (Funcall) to control time.
+3. This allows us to manipulate infinite data structures as if they were simple lists.
