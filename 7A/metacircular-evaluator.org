@@ -1,0 +1,129 @@
+#+TITLE: Lecture 7A: Metacircular Evaluator
+#+AUTHOR: Fabricio Puente-Mansilla
+#+DATE: <2026-04-19 Sun>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results value :exports both
+
+* Overview: The Universal Machine
+A *Metacircular Evaluator* is an interpreter for a language written in
+the language itself (e.g., a Lisp interpreter written in Lisp).
+
+It proves a profound concept in computer science: the idea of the
+"Universal Turing Machine." We can write a program that simulates any
+other machine, just by feeding it the rules of that machine.
+
+* The Yin and Yang: EVAL and APPLY
+The core of the evaluator is an infinite dance between two procedures:
+=eval= and =apply=.
+
+1. *EVAL* takes an expression and an environment. It decodes the
+   syntax (is it a variable? an =if= statement? a function call?). If
+   it's a function call, it evaluates the arguments and hands them to
+   =apply=.
+2. *APPLY* takes a procedure and its arguments. If it's a primitive
+   (like =+=), it just runs it. If it's a user-defined function, it
+   creates a *new environment*, binds the arguments to the parameters,
+   and hands the body of the function back to =eval=.
+
+* A Mini-Evaluator in Elisp (Babel Executable)
+Let's build a microscopic version of this right here. We will define
+our own =eval= and =apply=, completely bypassing standard Elisp execution.
+
+First, we load the common lisp library for a helper function:
+
+#+BEGIN_SRC elisp :results silent
+  (require 'cl-lib)
+#+END_SRC
+
+** 1. Define the Environment
+
+An environment is just a lookup table (an association list) that maps
+variable names to values. We will preload it with a primitive
+procedure.
+#+BEGIN_SRC elisp :results silent
+  (setq global-env
+        '((x . 10)
+          (y . 20)
+          (+ . (primitive +))))
+#+END_SRC
+
+** 2. The EVAL Function (The Decoder)
+
+This acts like the instruction decoder in a processor. It looks at the
+shape of the expression and decides what to do.
+
+#+BEGIN_SRC elisp :results silent
+  (defun micro-eval (exp env)
+    (cond
+     ;; 1. Self-evaluating (numbers)
+     ((numberp exp) exp)
+
+     ;; 2. Variable lookup (fetch from memory/environment)
+     ((symbolp exp)
+      (let ((binding (assoc exp env)))
+        (if binding (cdr binding) (error "Unbound variable: %s" exp))))
+
+     ;; 3. Lambda expressions (Create a closure)
+     ((eq (car exp) 'lambda)
+      (list 'closure (cadr exp) (caddr exp) env))
+
+     ;; 4. Function application (Execute)
+     (t
+      (micro-apply (micro-eval (car exp) env)
+                   (mapcar (lambda (e) (micro-eval e env)) (cdr exp))))))
+#+END_SRC
+
+** 3. The APPLY Function (The Execution Unit)
+
+This takes the decoded function and runs it.
+
+#+BEGIN_SRC elisp :results silent
+  (defun micro-apply (proc args)
+    (cond
+     ;; 1. Built-in hardware/primitive functions
+     ((eq (car proc) 'primitive)
+      (apply (cadr proc) args))
+
+     ;; 2. User-defined functions (Closures)
+     ((eq (car proc) 'closure)
+      (let ((params (cadr proc))
+            (body (caddr proc))
+            (saved-env (cadddr proc)))
+        ;; Extend the environment with the new arguments and evaluate the body
+        (micro-eval body (append (cl-pairlis params args) saved-env))))
+
+     (t (error "Unknown procedure type: %s" proc))))
+#+END_SRC
+
+** 4. Let's Test Our Machine!
+
+Now we can feed Lisp code into our own interpreter. Press =C-c C-c= on
+the block below.
+
+#+BEGIN_SRC elisp
+  ;; We are asking OUR evaluator to run this code, not Emacs!
+  (micro-eval '((lambda (a b) (+ a b)) x y) global-env)
+#+END_SRC
+
+If everything is correct, the result printed below the block should be
+=30=. Our evaluator successfully looked up =x= and =y=, created a closure
+for the lambda, mapped the arguments, and applied the primitive
+addition!
+
+* Extra Reading Material
+
+To truly master this, I highly recommend exploring the following texts
+that bridge the gap between abstract interpretation and
+hardware/compilation:
+
+1. *SICP Chapter 4.1:* The video lecture is great, but the book goes
+   into exact detail on how environments are constructed as linked
+   lists of frames.
+2. *"The Roots of Lisp" by Paul Graham:* A brilliant, short paper that
+   reconstructs Lisp from the ground up using only 7 primitive
+   operators. It's the mathematical foundation of what you just
+   watched.
+3. *"Essentials of Compilation" by Jeremy Siek:* Since you are diving
+   deep into how code runs, this book bridges the gap between an
+   evaluator (running code dynamically) and a compiler (translating
+   AST into x86/RISC-V assembly).
