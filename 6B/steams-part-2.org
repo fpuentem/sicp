@@ -1,0 +1,112 @@
+#+TITLE: Lecture 6B: Streams, Part 2
+#+AUTHOR: Fabricio Puente Mansilla
+#+DATE: <2026-03-22 Sun>
+#+OPTIONS: toc:2
+
+* Overview
+
+This lecture explores the power of streams to represent infinite data
+structures and the philosophical trade-offs between functional
+programming (timeless) and state-based programming (time-dependent).
+
+* Infinite Streams
+
+Streams allow us to represent "all" of something (like all integers or
+all primes) because elements are only computed on demand [00:00:45].
+
+** Example: The Integers
+
+A stream of integers can be defined recursively:
+
+#+BEGIN_SRC scheme
+  (define (integers-starting-from n)
+    (cons-stream n (integers-starting-from (+ n 1))))
+
+  (define integers (integers-starting-from 1))
+#+END_SRC
+
+** The Sieve of Eratosthenes [00:08:42]
+
+This is a classic algorithm for generating primes. In a stream-based
+view, it's a recursive filter:
+
+1. Start with integers from 2.
+2. The head is a prime.
+3. Filter the tail to remove all multiples of the head.
+4. Recursively 'sieve' the result.
+
+* Streams as Signal Processing [00:15:02]
+
+One of the most powerful ways to think about streams is as signals in
+a circuit. This is particularly relevant for those with an Electrical
+Engineering background.
+
+** Basic Stream Operators
+
+- =add-streams=: Element-wise addition of two streams [00:15:17].
+- =scale-stream=: Multiplies every element by a constant [00:16:00].
+
+** Recursive Data Definitions (Feedback Loops)
+
+We can define data objects in terms of themselves using feedback loops
+[00:20:11].
+
+- *Ones*: =(define ones (cons-stream 1 ones))= [00:16:46].
+- *Integers*: Defined as the integral of the stream of ones [00:17:25].
+
+** Integration and Differential Equations [00:22:03]
+
+We can build a stream =integral= box that mimics an analog
+computer. However, solving differential equations like $y' = y^2$
+reveals a limitation: if the feedback loop doesn't have a "delay"
+(like the one built into =cons-stream=), the program will hang
+[00:27:54].
+
+- *Solution*: Use an explicit =delay= to break the circular dependency
+  [00:32:11].
+
+* Normal Order vs. Applicative Order [00:36:09]
+
+The lecture discusses why we don't just make the whole language "lazy."
+
+| Feature      | Applicative Order (Standard Lisp)   | Normal Order (Lazy)                       |
+| :---         | :---                                | :---                                      |
+| *Evaluation*   | Arguments evaluated before the call | Arguments delayed until needed            |
+| *Efficiency*   | Avoids re-computing arguments       | Can lead to "dragging tails" [00:41:01]   |
+| *Side Effects* | Predictable                         | Highly confusing/unpredictable [00:43:52] |
+
+* The Functional vs. State Debate
+
+** The Banking Example [00:48:07]
+
+- *Object View*: A bank account is an object with local state (balance)
+  changed by messages.
+
+- *Stream View*: A bank account is a function that maps a *stream of
+  transactions* to a *stream of balances* [00:49:30].
+
+** The "Merge" Problem [00:52:01]
+
+A major challenge for pure functional programming is modeling
+independent agents (like two people sharing a joint account).
+
+- To combine their transaction streams, we need a =merge= operation.
+
+- A "Fair Merge" requires knowledge of *time* (which person typed
+  first), but the stream view attempts to throw away time [01:00:12].
+
+* Key Terminology
+
+- *cons-stream*: A macro that expands to =(cons head (delay tail))=
+  [00:18:57].
+- *Force/Delay*: The underlying mechanism for lazy evaluation.
+- *Normal Order*: Evaluating expressions only when their value is
+  required for a primitive operation.
+- *Fair Merge*: A non-deterministic process to combine two streams based
+  on arrival time [00:53:37].
+
+* Summary Thoughts
+
+Streams allow for modularity without the "nasty" side effects of
+assignment (=set!=), but they struggle to model systems where the order
+of independent events (time) is the primary concern.
