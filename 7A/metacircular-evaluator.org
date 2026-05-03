@@ -4,126 +4,438 @@
 #+OPTIONS: toc:2
 #+PROPERTY: header-args:elisp :results value :exports both
 
-* Overview: The Universal Machine
-A *Metacircular Evaluator* is an interpreter for a language written in
-the language itself (e.g., a Lisp interpreter written in Lisp).
+* Overview: Programs as Machines
 
-It proves a profound concept in computer science: the idea of the
-"Universal Turing Machine." We can write a program that simulates any
-other machine, just by feeding it the rules of that machine.
+Up until this point, we have been thinking of programs as character
+string descriptions of wiring diagrams. For example, a
+program for factorial is essentially a blueprint for a potentially
+infinite machine composed of switches and operations.
 
-* The Yin and Yang: EVAL and APPLY
-The core of the evaluator is an infinite dance between two procedures:
-=eval= and =apply=.
+While graphical representations of these diagrams are possible, text
+is preferred because it takes up less space and is easier to
+edit.
 
-1. *EVAL* takes an expression and an environment. It decodes the
-   syntax (is it a variable? an =if= statement? a function call?). If
-   it's a function call, it evaluates the arguments and hands them to
-   =apply=.
-2. *APPLY* takes a procedure and its arguments. If it's a primitive
-   (like =+=), it just runs it. If it's a user-defined function, it
-   creates a *new environment*, binds the arguments to the parameters,
-   and hands the body of the function back to =eval=.
+* The Universal Machine: /eval/
 
-* A Mini-Evaluator in Elisp (Babel Executable)
-Let's build a microscopic version of this right here. We will define
-our own =eval= and =apply=, completely bypassing standard Elisp execution.
+The most remarkable concept in computation is the existence of a
+"universal machine".
 
-First, we load the common lisp library for a helper function:
+- The eval procedure is exactly this machine.
+- It takes a description of another machine (like the factorial
+  program) as input, and configures itself to act as a simulator for
+  that specific machine.
+- If you were to build an analog electronic equivalent (like a
+  dynamically configuring low-pass filter), it would be incredibly
+  complex. However, the software universal machine is so
+  simple that its core logic fits entirely on a single
+  blackboard.
 
-#+BEGIN_SRC elisp :results silent
-  (require 'cl-lib)
-#+END_SRC
+* The Structure of eval
 
-** 1. Define the Environment
+The ~eval~ procedure takes two arguments: an expression and an
+environment. Structurally, it is a giant case analysis (a
+dispatch) that checks the type of the expression and decides what to
+do.
 
-An environment is just a lookup table (an association list) that maps
-variable names to values. We will preload it with a primitive
-procedure.
-#+BEGIN_SRC elisp :results silent
-  (setq global-env
-        '((x . 10)
-          (y . 20)
-          (+ . (primitive +))))
-#+END_SRC
+** Note on Syntax
 
-** 2. The EVAL Function (The Decoder)
+Sussman explicitly notes that the implementation he writes on the
+board uses "ugly, dirty, disgusting" concrete syntax (heavy use of ~CAR~
+and ~CDR~). A professional implementation would use
+data-directed programming, but he uses concrete syntax simply to make
+it compact enough to fit on the blackboard.
 
-This acts like the instruction decoder in a processor. It looks at the
-shape of the expression and decides what to do.
+* The Dispatch Rules
 
-#+BEGIN_SRC elisp :results silent
-  (defun micro-eval (exp env)
-    (cond
-     ;; 1. Self-evaluating (numbers)
-     ((numberp exp) exp)
+Here are the specific cases handled by the ~eval~ case analysis:
 
-     ;; 2. Variable lookup (fetch from memory/environment)
-     ((symbolp exp)
-      (let ((binding (assoc exp env)))
-        (if binding (cdr binding) (error "Unbound variable: %s" exp))))
+1. *Numbers:* If the expression is a number, it evaluates to
+   itself.
+2. *Symbols (Variables):* If the expression is a symbol, ~eval~ looks
+   it up in the environment. The environment acts as a
+   dictionary mapping symbol names to their respective values.
+3. *Quotations:* Expressions starting with ~quote~ are an
+   abbreviation. ~eval~ simply returns the quoted object
+   (which is the ~CADR~, or second element, of the expression).
+4. *Lambda Expressions:* These evaluate to a procedure object, which
+   Sussman flags as a "closure". The closure packages
+   together three things: the bound variable list, the body of the
+   procedure, and the current environment captured at the time of
+   evaluation.
+5. *Conditionals (~cond~):* These are routed to a helper procedure named
+   ~evcond~ to process the clauses.
+6. *Combinations / Applications (The ~else~ case):* If an expression is
+   not any of the special forms above, it is treated as a procedure
+   application.
+   - First, ~eval~ evaluates the operator (the ~CAR~ of the expression)
+     to get the actual procedure.
+   - Next, it evaluates all the operands using a helper called
+     ~EVLIST~ to get the arguments.
+   - Finally, it passes the procedure and the arguments to the ~apply~
+     function.
 
-     ;; 3. Lambda expressions (Create a closure)
-     ((eq (car exp) 'lambda)
-      (list 'closure (cadr exp) (caddr exp) env))
+* Elisp Demonstration: A Metacircular Sketch
 
-     ;; 4. Function application (Execute)
-     (t
-      (micro-apply (micro-eval (car exp) env)
-                   (mapcar (lambda (e) (micro-eval e env)) (cdr exp))))))
-#+END_SRC
-
-** 3. The APPLY Function (The Execution Unit)
-
-This takes the decoded function and runs it.
-
-#+BEGIN_SRC elisp :results silent
-  (defun micro-apply (proc args)
-    (cond
-     ;; 1. Built-in hardware/primitive functions
-     ((eq (car proc) 'primitive)
-      (apply (cadr proc) args))
-
-     ;; 2. User-defined functions (Closures)
-     ((eq (car proc) 'closure)
-      (let ((params (cadr proc))
-            (body (caddr proc))
-            (saved-env (cadddr proc)))
-        ;; Extend the environment with the new arguments and evaluate the body
-        (micro-eval body (append (cl-pairlis params args) saved-env))))
-
-     (t (error "Unknown procedure type: %s" proc))))
-#+END_SRC
-
-** 4. Let's Test Our Machine!
-
-Now we can feed Lisp code into our own interpreter. Press =C-c C-c= on
-the block below.
+Here is an Emacs Lisp translation of the metacircular ~eval~ structure
+Sussman sketches on the board. While Emacs uses ~eval~ under the hood
+differently (written in C for speed), the structural logic of the
+dispatch remains the same.
 
 #+BEGIN_SRC elisp
-  ;; We are asking OUR evaluator to run this code, not Emacs!
-  (micro-eval '((lambda (a b) (+ a b)) x y) global-env)
+  (defun fab/eval (exp env)
+    "A simplified metacircular evaluator dispatch."
+    (cond
+     ;; 1. Numbers evaluate to themselves
+     ((numberp exp) exp)
+
+     ;; 2. Symbols are looked up in the environment
+     ((symbolp exp) (fab/lookup exp env))
+
+     ;; 3. Quotations return the quoted text
+     ((eq (car exp) 'quote) (cadr exp))
+
+     ;; 4. Lambdas create a closure (capturing the environment)
+     ((eq (car exp) 'lambda)
+      (list 'closure (cdr exp) env))
+
+     ;; 5. Conditionals are sent to a helper
+     ((eq (car exp) 'cond)
+      (fab/evcond (cdr exp) env))
+
+     ;; 6. Combinations (Applications)
+     (t
+      (fab/apply (fab/eval (car exp) env)          ;; Evaluate operator
+                (fab/evlist (cdr exp) env)))))    ;; Evaluate operands
+
+  ;; Note: fab/lookup, fab/evcond, fab/apply, and fab/evlist
+  ;; are left abstract here, just as they are at the end of the video segment!
+  (princ "Evaluator dispatch structure loaded successfully.\n")
 #+END_SRC
 
-If everything is correct, the result printed below the block should be
-=30=. Our evaluator successfully looked up =x= and =y=, created a closure
-for the lambda, mapped the arguments, and applied the primitive
-addition!
+--
 
-* Extra Reading Material
+* The Core of Execution: The apply Procedure
 
-To truly master this, I highly recommend exploring the following texts
-that bridge the gap between abstract interpretation and
-hardware/compilation:
+While ~eval~ is responsible for dispatching on the syntax of an
+expression, ~apply~ does the actual work of executing a procedure. The
+~apply~ procedure takes two arguments: a procedure object and a list
+of evaluated arguments.
 
-1. *SICP Chapter 4.1:* The video lecture is great, but the book goes
-   into exact detail on how environments are constructed as linked
-   lists of frames.
-2. *"The Roots of Lisp" by Paul Graham:* A brilliant, short paper that
-   reconstructs Lisp from the ground up using only 7 primitive
-   operators. It's the mathematical foundation of what you just
-   watched.
-3. *"Essentials of Compilation" by Jeremy Siek:* Since you are diving
-   deep into how code runs, this book bridges the gap between an
-   evaluator (running code dynamically) and a compiler (translating
-   AST into x86/RISC-V assembly).
+It has two primary cases:
+
+- *Primitive Procedures:* If the procedure is primitive (like ~+~ or
+  ~*~), the evaluator drops down a level and uses a "magic"
+  application (~apply primop~) to execute the underlying machine
+  language instruction.
+- *Compound Procedures (Closures):* If the procedure type is
+  ~closure~, the evaluator must evaluate the body of the
+  procedure.
+
+** The Rule for Applying Compound Procedures
+
+To apply a compound procedure, the evaluator must execute the
+procedure's body in a new environment. This new environment
+is created by extending the environment captured inside the
+closure. The new environment frame binds the procedure's
+formal parameters to the actual arguments passed during the call.
+
+Sussman notes that a professional compiler would use a data-directed
+dispatch instead of a simple conditional here. A robust
+system would also include error checking (e.g., trying to apply a
+number like ~1~ to an argument) and cases for compiled code or
+external Fortran routines.
+
+* Processing Arguments: evlist
+
+When ~eval~ encounters a standard combination (a function call), it
+uses ~evlist~ to evaluate all the operands into actual arguments.
+
+- ~evlist~ maps over the list of operands.
+- If the list is empty, it returns the empty list.
+- Otherwise, it evaluates the first operand (~CAR~) in the current
+  environment and ~cons~ -es the result onto the recursive ~evlist~ of
+  the rest of the operands (~CDR~).
+
+Sussman emphasizes keeping this extremely simple. This
+simplicity ensures it serves as the kernel for all possible language
+evaluators, whether they support advanced features like procedural
+arguments (Scheme) or not (ALGOL).
+
+* Handling Special Forms: evcond
+
+Conditionals are evaluated clause by clause using ~evcond~.
+
+- If there are no more clauses, it returns the empty list.
+- If the predicate of the current clause is ~else~, it evaluates the
+  corresponding expression (the ~CADAR~ of the clauses).
+- If the evaluated predicate is false, it discards the clause and
+  recursively calls ~evcond~ on the remaining clauses.
+- If the evaluated predicate is true, it evaluates the corresponding
+  expression.
+
+* Building the Environment Model
+
+The environment is a dictionary mapping symbols to values, represented
+as a list of frames.
+
+** bind and pair-up
+
+- ~bind~: Takes a list of variables, a list of values, and a base
+  environment. It makes a new environment structure by
+  creating a new frame and `cons`ing it onto the existing environment
+  list.
+- ~pair-up~: Creates the new frame by zipping the variables and values
+  together. It checks for arity errors: if it runs out of variables
+  before values, there are "too many arguments". If it runs out of
+  values before variables, there are "too few arguments".
+
+** lookup and assq
+
+- ~lookup~: Searches for a symbol's value. If the environment is
+  completely empty, it triggers an "unbound variable" error. It uses
+  ~assq~ to search the first frame. If the symbol isn't found, it
+  recursively searches the rest of the environment frames. If found,
+  it returns the value (the ~CDR~ of the key-value pair).
+- ~assq~: A standard a-list search procedure. Sussman notes
+  a bug on the blackboard: to check the symbol against the key of the
+  first pair, you must use ~CAAR~, not ~CAR~.
+
+* Tracing an Evaluation
+
+Sussman concludes this section of the lecture by tracing a complex
+evaluation using the interpreter. The starting global
+environment is ~e0~, which comes pre-loaded with primitives like ~+~,
+~*~, ~-~, ~quotient~, ~CAR~, ~CDR~, ~CONS~, and ~EQ~.
+
+The target expression is:
+
+=(((lambda (x) (lambda (y) (+ x y))) 3) 4)=
+
+This expression demonstrates a procedure that takes ~x~ and returns a
+new procedure taking ~y~. The outer procedure is applied to ~3~, and the
+resulting procedure is immediately applied to ~4~. Because this
+evaluation has no side-effects or assignments, we can safely use the
+substitution model to trace the results.
+
+* Elisp Demonstration: Exploring evlist
+
+You can run this block to see how ~evlist~ sequentially processes
+arguments in a metacircular style.
+
+#+BEGIN_SRC elisp
+  ;; A simulated environment and a basic eval to test evlist
+  (setq dummy-env '((x . 10) (y . 20)))
+
+  (defun dummy-eval (exp env)
+    (cond ((numberp exp) exp)
+          ((symbolp exp) (cdr (assq exp env)))
+          (t (error "Unknown expression"))))
+
+  (defun my-evlist (operands env)
+    "Evaluates a list of operands into arguments."
+    (if (null operands)
+        nil
+      (cons (dummy-eval (car operands) env)
+            (my-evlist (cdr operands) env))))
+
+  ;; Let's evaluate the operands '(x 5 y) in our dummy environment
+  (princ (format "Evaluated Arguments: %s\n"
+                 (my-evlist '(x 5 y) dummy-env)))
+#+END_SRC
+
+--
+
+* Tracing a Complex Evaluation
+
+Sussman traces the execution of the expression ~(((lambda (x)
+(lambda(y) (+ x y))) 3) 4)~ in the global environment ~e0~.
+
+Because the expression does not start with a special form (like
+~lambda~ or ~cond~), ~eval~ treats it as a combination (application).
+
+** Step 1: Evaluating the Operator and Operands
+
+The rule for combinations dictates that ~eval~ must evaluate the
+operator and evaluate the operands (using ~evlist~).
+
+- The operator is ~((lambda (x) (lambda (y) (+ x y))) 3)~.
+- The operand is ~(4)~.
+
+** Step 2: The Inner Application
+
+To evaluate the operator, the interpreter must perform *another*
+application.
+
+- It evaluates the ~lambda~ expression, which creates a *closure*
+  object. This closure binds ~x~, has the body ~(lambda (y) (+ x y))~,
+  and captures the global environment ~e0~.
+- It then passes this closure and the evaluated argument ~3~ to ~apply~.
+
+** Step 3: Binding Environment e1
+
+~apply~ takes the closure and the argument ~3~ and creates a new
+environment, ~e1~.
+
+- ~e1~ has ~e0~ as its parent.
+- Inside ~e1~, the variable ~x~ is bound to ~3~.
+- ~eval~ is then called to evaluate the body of the closure ~(lambda (y)
+  (+ x y))~ inside this new environment ~e1~.
+
+** Step 4: The Second Closure
+
+Evaluating that inner ~lambda~ inside ~e1~ creates a *second*
+closure.
+
+- This closure binds ~y~, has the body ~(+ x y)~, and critically, it
+  captures ~e1~ (where ~x=3~) as its environment.
+
+** Step 5: Binding Environment e2 and the Primitive Addition
+
+Now, ~apply~ takes this second closure and the argument ~4~.
+
+- It creates environment ~e2~, with ~e1~ as its parent.
+- Inside ~e2~, ~y~ is bound to ~4~.
+- Finally, ~eval~ evaluates the body ~(+ x y)~ in ~e2~. It
+  looks up ~+~ (found in ~e0~), ~x~ (found in ~e1~ as 3), and ~y~
+  (found in ~e2~ as 4). ~apply~ then executes the primitive
+  addition to get ~7~.
+
+* The eval/apply Cycle
+
+This trace reveals the core heartbeat of the Lisp interpreter: ~eval~
+and ~apply~ are mutually recursive.
+
+- ~eval~ reduces expressions to procedures and arguments, and passes
+  them to ~apply~ .
+- ~apply~ takes procedures and arguments, binds them into an
+  environment, and passes the body back to ~eval~.
+- Sussman compares this to M.C. Escher's "Drawing Hands," where each
+  hand draws the other to construct the real thing.
+
+* The Philosophy of Recursive Definitions
+
+Sussman anticipates a profound question: If Lisp is defined by a Lisp
+program (the evaluator), isn't that completely vacuous? How
+does a self-referential definition mean anything?
+
+To explore this, he looks at a recursive program for computing
+exponentials:
+
+#+BEGIN_SRC lisp
+  (define (expt x n) (if (= n 0) 1 (* x
+                                      (expt x (- n 1)))))
+#+END_SRC
+
+--
+
+* Recursion as Finding a Fixed Point
+
+Sussman addresses the philosophical problem of recursive definitions:
+how can a procedure like exponentiation (~EXPT~) be defined in terms
+of itself without being logically vacuous?
+
+He explains that a recursive definition is actually an equation that
+constrains what the procedure can be.
+
+- To solve this equation, we define a higher-order procedure ~f~.
+- ~f~ takes a procedure argument ~g~ and returns a new procedure of
+  two arguments, ~x~ and ~n~. If ~n~ is =0=, it returns =1=;
+  otherwise, it returns the product of ~x~ and ~(g x (- n 1))~.
+- If we pass a valid exponentiation procedure into ~f~, ~f~ will
+  return a valid exponentiation procedure.
+- Therefore, the true ~EXPT~ procedure is mathematically the **fixed
+  point** of ~f~.
+
+* Iterative Approximation
+
+To find this fixed point, we can iteratively apply ~f~ to build better
+and better approximations:
+
+- *$e_0$*: A procedure that always throws an error (the worst
+  approximation).
+- *$e_1 = f(e_0)$*: This procedure successfully computes $x^0$, but
+  errors on anything else.
+- *$e_2 = f(e_1)$*: This procedure works for powers $0$ and $1$.
+- *$e_3 = f(e_2)$*: This works for powers $0$, $1$, and $2$.
+
+The true, infinite exponentiation procedure ~EXPT~ is the limit of
+$e_m$ as $m$ approaches infinity.
+
+* The Y Combinator (Curry's Paradoxical Combinator)
+
+To achieve this infinite nesting computationally, we need an infinite
+loop. The simplest infinite loop is a procedure applying
+itself to itself: ~((lambda (x) (x x)) (lambda (x) (x x)))~.
+
+By perturbing this infinite loop, we arrive at **Curry's Paradoxical
+Combinator ($Y$)**, named after a logician from the 1930s:
+
+- $Y$ is an operator that takes a function $F$.
+- By its internal structure, applying $Y$ to $F$ yields
+  $F(Y(F))$.
+- In other words, $Y$ is a magical machine that automatically produces
+  the fixed point of the function it is given.
+
+* The Dangers of Limit Arguments
+
+Sussman warns that making mathematical arguments based on limits and
+convergence without formal proof is dangerous.
+
+- He demonstrates a valid limit: If $u = 1 + \frac{1}{2} +
+  \frac{1}{4} + \frac{1}{8} \dots$, we can algebraically show
+  $2(u - 1) = u$, meaning $u = 2$.
+- He then shows a paradox using the same logic on a divergent series:
+  If $v = 1 + 2 + 4 + 8 \dots$, then $\frac{v - 1}{2} = v$, which
+  falsely implies $v = -1$.
+- To rigorously prove that our programmatic limits converge, we must
+  rely on Denotational Semantics, specifically the Scott-Strachey
+  method detailed in Joe Stoy's book.
+
+* Why use define?
+
+A student asks: if we can use the $Y$ Combinator to create recursive
+functions without naming them, why does Lisp have ~define~?
+
+- Sussman clarifies that the fixed-point method requires knowing the
+  entire set of equations at once.
+- Real-world Lisp uses ~define~ to actually mutate the environment
+  structure. This allows for an interactive system where a
+  programmer can incrementally change one piece of code and debug it
+  without redefining the entire universe.
+
+* Elisp Demonstration: The Applicative-Order Y Combinator
+
+Because standard Lisp (and Emacs Lisp) uses applicative-order
+evaluation, the pure $Y$ Combinator would evaluate its arguments
+immediately and loop infinitely before doing any work. To fix this, we
+wrap the self-application in an extra ~lambda~ to delay execution
+(sometimes called the Z Combinator).
+
+Here is how you can achieve pure, anonymous recursion in Elisp without
+ever using ~defun~ or ~setq~ for the recursive call.
+
+#+BEGIN_SRC elisp
+  (setq lexical-binding t)
+
+  ;; The Applicative-Order Y Combinator
+  (setq Y
+        (lambda (f)
+          ((lambda (x) (funcall x x))
+           (lambda (x)
+             (funcall f (lambda (&rest args)
+                          (apply (funcall x x) args)))))))
+
+  ;; We define the 'generator' function for Factorial (similar to Sussman's EXPT)
+  (setq make-fact
+        (lambda (g)
+          (lambda (n)
+            (if (= n 0)
+                1
+              (* n (funcall g (- n 1)))))))
+
+  ;; We generate the recursive factorial function dynamically!
+  (setq pure-recursive-fact (funcall Y make-fact))
+
+  (princ (format "Factorial of 6 computed via Y-Combinator: %s\n"
+                 (funcall pure-recursive-fact 6)))
+#+END_SRC

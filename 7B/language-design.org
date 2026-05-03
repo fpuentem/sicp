@@ -1,0 +1,450 @@
+#+TITLE: Lecture 7B: Metacircular Evaluator, Part 2
+#+AUTHOR: Fabricio Puente-Mansilla
+#+DATE: <2026-05-02 Sat>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Overview: The Value of Metacircular Interpreters
+
+Metacircular interpreters are an incredibly convenient medium for
+exploring language design issues. Because they are defined in
+terms of themselves, they are short, compact, and simple to
+understand.
+
+Sussman highlights their practical utility:
+
+- They allow developers to easily add new features and observe what
+  happens.
+- He spends up to 50% of his time experimenting with various design
+  alternatives using these interpreters.
+- They are excellent for exchanging ideas; you can write a small
+  interpreter, send it to a colleague over network mail, and have them
+  test or modify it.
+
+* The Dangers of Language Bloat
+
+Before adding features, Sussman warns against two common traps that
+can disastrously destroy a system:
+
+- *Creeping Featurism:* This occurs when different people keep adding
+  their own "pet features" to a system[cite: 2]. Eventually, this
+  results in a manual that is 500 pages long and impossible for anyone
+  to understand.
+
+- *Feeping Creaturism:* This happens when a system becomes overwhelmed
+  by complex I/O features, like fancy displays and mice[cite: 2]. The
+  resulting disk swapping and processing overhead reduce the actual
+  computer language to a "dismal, little, tiny thing that barely
+  works"[cite: 2]. Sussman cited the Windows example.
+
+* Feature Addition: Indefinite Numbers of Arguments
+
+To demonstrate how easy it is to modify the interpreter, Sussman walks
+through adding support for procedures that take an indefinite number
+of arguments[cite: 2]. This is a valuable feature already present in
+procedures like ~plus~ and ~times~[cite: 2].
+
+** Syntactic Specification
+
+To implement this, the language needs a clear, unambiguous way to
+notate the extra arguments[cite: 2]. Sussman borrows a notation
+already used by the Lisp reader for representing ~conses~: the "dot
+notation"[cite: 2].
+
+There are three syntactically distinguishable cases[cite: 2]:
+
+1. *Fixed Arguments:* ~(x y z)~. A fixed number of explicitly named formal
+   parameters[cite: 2].
+2. *One Required, Rest Grouped:* ~(x . y)~. ~x~ is a required argument, and
+   the dot indicates that ~y~ will be the list of all remaining
+   arguments[cite: 2].
+3. *All Grouped:* ~x~ (no parentheses). A single formal parameter that
+   matches against the list of all passed arguments[cite: 2].
+
+** Semantics and Interpreter Modification
+
+To make this work, the interpreter's pairing procedure—the part that
+matches formal parameters to passed arguments—must be updated[cite:
+2].
+
+Sussman explains the pairing logic[cite: 2]:
+
+- If the list of variables is empty and the list of values is empty,
+  return an empty list[cite: 2].
+- If variables are empty but values are not, there are too many
+  arguments[cite: 2].
+- If values are empty but variables are not, there are too few
+  arguments[cite: 2].
+- *The New Rule (Symbolic Tail):* If the variables list is a symbol
+  (rather than a list), it represents a "symbolic tail"[cite: 2]. The
+  interpreter must match that single variable with all remaining
+  values and add that to the pairing[cite: 2].
+
+* Elisp Demonstration: The Pairing Logic
+
+Here is how that pairing logic looks when implemented in Emacs
+Lisp. You can evaluate this block to see how Lisp handles the
+"symbolic tail" during variable binding.
+
+#+BEGIN_SRC elisp
+  (defun pair-up (vars vals)
+    "Matches formal parameters (VARS) to arguments (VALS)."
+    (cond
+     ;; Base case: both are empty
+     ((and (null vars) (null vals))
+      nil)
+
+     ;; The Symbolic Tail case (e.g., the 'y' in (x . y) or just 'x')
+     ((symbolp vars)
+      (list (cons vars vals)))
+
+     ;; Error cases
+     ((null vars) (error "Too many arguments"))
+     ((null vals) (error "Too few arguments"))
+
+     ;; Standard recursive pairing
+     (t
+      (cons (cons (car vars) (car vals))
+            (pair-up (cdr vars) (cdr vals))))))
+
+  ;; Test 1: Fixed Arguments (x y z)
+  (princ (format "Fixed: %s\n"
+                 (pair-up '(x y z) '(1 2 3))))
+
+  ;; Test 2: Dot Notation (x . y)
+  (princ (format "Dotted: %s\n"
+                 (pair-up '(x . y) '(1 2 3 4 5))))
+
+  ;; Test 3: Single Symbol (x) -> captures everything
+  (princ (format "Single Symbol: %s\n"
+                 (pair-up 'x '(1 2 3))))
+#+END_SRC
+
+#+RESULTS:
+: Fixed: ((x . 1) (y . 2) (z . 3))
+: Dotted: ((x . 1) (y 2 3 4 5))
+: Single Symbol: ((x 1 2 3))
+
+* Wrapping up Variadic Functions: The Symbolic Tail
+
+To conclude the previous section's question on syntax, Sussman
+clarifies how the Lisp list structure handles indefinite
+arguments[cite: 3].
+
+- When the evaluator looks at the bound variable list of a procedure,
+  it might find a "symbolic tail" (a symbol that doesn't end in the
+  empty list, like the ~y~ in ~(x . y)~)[cite: 3].
+- In that case, the interpreter matches that symbol with the entire
+  list of remaining argument values and adds that to the pairing[cite:
+  3].
+
+* The Motivation for Dynamic Binding
+
+Sussman introduces a famous variation present in early Lisps (and
+languages like APL): Dynamic Binding[cite: 3]. He explains the
+motivation by attempting to abstract repetitive code[cite: 3].
+
+** The Abstraction Problem
+
+Imagine writing two procedures: ~sum-powers~ and ~product-powers~[cite:
+3]. Both procedures loop through values and apply the operation
+$x^n$[cite: 3].  To avoid repeating the exponentiation logic, you try
+to abstract it into a helper procedure called ~nth-power~[cite: 3].
+
+** The Free Variable Trap
+
+The definition of ~nth-power~ needs to use the variable ~n~, making ~n~ a
+"free variable" (a variable not explicitly passed as an argument to
+that specific function)[cite: 3].
+
+- In the standard environment model (Lexical/Static binding), the
+  meaning of a free variable is determined by the environment in which
+  the procedure is *defined*[cite: 3].
+- Because ~nth-power~ is defined in the global environment where ~n~ does
+  not exist, the interpreter will throw an "unbound variable"
+  error[cite: 3].
+
+* Understanding Dynamic Binding
+
+To make the ~nth-power~ abstraction work without passing ~n~ explicitly
+through every layer of the program, early language designers changed
+the lookup rules[cite: 3].
+
+- *The Rule of Dynamic Binding:* A free variable is interpreted as
+  having its value in the environment of the *caller* of the procedure,
+  rather than the environment of definition[cite: 3].
+- The interpreter searches up the active call chain to find where the
+  variable was last bound[cite: 3].
+
+** Modifying the Evaluator for Dynamic Binding
+
+Implementing this requires two major changes to the Metacircular
+Evaluator[cite: 3]:
+
+1. *No More Closures:* When =EVAL= processes a ~lambda~ expression, it
+   no longer needs to capture the environment to make a closure; it
+   just returns the expression itself[cite: 3].
+2. *Passing the Caller's Environment:* The combination evaluator must
+   pass its current environment (the caller's environment) down to
+   =APPLY=[cite: 3]. =APPLY= then uses that caller environment to bind
+   the formal parameters to the arguments[cite: 3].
+
+* The Modularity Crisis
+
+While dynamic binding seems like a clever fix, Sussman demonstrates
+that it causes a severe "modularity crisis"[cite: 3].
+
+** Internal Names Destroy External Code
+
+If two people are working on a large system, they expect their
+internal variable names to not interfere with each other[cite:
+3]. However, dynamic binding violates this constraint[cite: 3].
+
+- Suppose the person who wrote the ~sum~ procedure decides to rename
+  their internal loop incrementer variable from ~next~ to ~n~[cite: 3].
+- Because dynamic binding searches up the call chain, when ~nth-power~
+  looks for ~n~, it will accidentally find the loop variable inside ~sum~
+  instead of the ~n~ passed into ~sum-powers~[cite: 3].
+- This completely breaks the program, even though the external
+  specifications of the functions never changed[cite: 3].
+
+** The Death of the Lambda Quantifier
+
+Because of this vulnerability, the ~lambda~ symbol loses its
+mathematical integrity[cite: 3]. In mathematics, a quantifier's
+internal names shouldn't matter; you should be able to uniformly
+substitute any internal name without changing the meaning of the
+expression[cite: 3]. Dynamic binding destroys this property[cite: 3].
+
+* Elisp Demonstration: The Modularity Bug
+
+Emacs Lisp is uniquely suited to demonstrate this because you can
+easily simulate dynamic binding. Evaluate the code below to see how an
+internal variable name can accidentally sabotage a program.
+
+#+BEGIN_SRC elisp
+  ;; Turn OFF lexical binding to simulate the "Old Lisp" dynamic environment
+  (setq lexical-binding nil)
+
+  ;; The helper function relies on a free variable 'n'
+  (defun nth-power (x)
+    (expt x n))
+
+  ;; The "sum" function written by Developer A
+  (defun my-sum (n-loops)
+    ;; Developer A decides to use 'n' as their internal loop counter.
+    ;; They have no idea Developer B's 'nth-power' needs a variable named 'n'.
+    (let ((n n-loops))
+      (nth-power 2)))
+
+  ;; The "sum-powers" function written by Developer B
+  (defun sum-powers (target-n)
+    (let ((n target-n)) ;; B binds 'n' to 3, expecting 2^3 = 8
+      (my-sum 99)))     ;; But my-sum internally rebinds 'n' to 99!
+
+  ;; The result is 2^99 instead of 2^3 because 'nth-power' dynamically
+  ;; grabs the 'n' from my-sum's environment!
+  (princ (format "Result: %s\n" (sum-powers 3)))
+#+END_SRC
+
+* The Death of the Lambda Quantifier (Dynamic Binding Continued)
+
+Sussman continues his demonstration of how dynamic binding breaks a
+program if an internal variable name is changed[cite: 4].
+
+- If the writer of the ~sum~ procedure changes their internal loop
+  incrementer from ~next~ to ~n~, it completely breaks the external
+  ~sum-powers~ program[cite: 4].
+- Instead of using the ~n~ defined in ~sum-powers~, the dynamic binding
+  chases up the call chain and grabs the ~n~ from inside ~sum~[cite: 4].
+- This destroys the mathematical definition of ~lambda~[cite: 4]. A
+  ~lambda~ is supposed to be a quantifier where bound names are
+  unimportant; you should be able to uniformly substitute new names as
+  long as they don't conflict internally, and the expression's meaning
+  should remain unchanged[cite: 4].
+
+* The Lexical Solution: Higher-Order Functions
+
+Because dynamic binding causes this severe modularity crisis, Sussman
+abandons it in favor of a lexical system[cite: 4]. To achieve the
+abstraction he originally wanted without name conflicts, he uses a
+procedure that *returns* another procedure[cite: 4].
+
+He defines a procedure named ~PGEN~ that takes ~n~ and produces an
+"exponentiator" procedure for that specific ~n~[cite: 4]. By returning a
+closure, the abstraction is encapsulated and cannot be destroyed by a
+change of names elsewhere in the program[cite: 4].
+
+** First-Class Procedures are Essential
+
+A student asks if this solution only works in languages capable of
+defining objects as procedures[cite: 4]. Sussman confirms this,
+stating that the ability to return a procedural value (first-class
+procedures) is essential to doing very good modular programming[cite:
+4].
+
+--
+
+* Introduction to Call-by-Name (Delayed Arguments)
+
+With the binding issue resolved, Sussman moves on to a new feature:
+controlling the order of evaluation.
+
+- Previously with streams, the caller and callee had to explicitly
+  agree on when to delay and force arguments.
+- Sussman wants to build a system where the designer of a procedure
+  can explicitly declare certain parameters to be delayed
+  automatically. He notes that ALGOL 60 had a similar feature
+  where arguments could be passed "by name," meaning the argument's
+  value was only computed if it was actually accessed.
+
+** The Motivation: Custom Control Structures (~unless~)
+
+Why do we need this? If we want to define custom control structures as
+ordinary procedures, standard Lisp (which evaluates all arguments
+before application) fails.
+
+Sussman proposes an ~unless~ procedure (the reverse of ~if~), which takes
+a predicate ~p~, a consequent ~c~, and an alternative ~a~.
+
+Consider this execution:
+~(unless (= 1 0) 2 (/ 1 0))~
+
+- We want this to evaluate to ~2~ because ~1~ does not equal ~0~.
+- However, standard Lisp evaluates all arguments *before* calling the
+  procedure.
+- It will attempt to evaluate the quotient of ~1~ and ~0~ and crash with a
+  divide-by-zero error, even though the alternative should never have
+  been reached.
+
+To fix this, the language needs a mechanism to declare that the
+consequent and alternative arguments should not be evaluated at the
+time of the call.
+
+* Elisp Demonstration: The PGEN Lexical Generator
+
+Here is how Sussman's ~PGEN~ solution looks in Emacs Lisp. It leverages
+lexical closures to completely avoid the name-collision problems of
+dynamic binding.
+
+#+BEGIN_SRC elisp
+  ;; Ensure lexical binding is on
+  (setq lexical-binding t)
+
+  ;; PGEN: A function that returns a function
+  (defun PGEN (n)
+    "Generates an exponentiator function for power N."
+    (lambda (x) (expt x n)))
+
+  ;; We generate a specific "cube" function (n=3)
+  (setq cube-func (PGEN 3))
+
+  ;; Even if we introduce a conflicting 'n' in our local environment,
+  ;; the 'cube-func' remembers its own 'n' from when it was created!
+  (let ((n 99))
+    (princ (format "Result of 2^3: %s\n" (funcall cube-func 2))))
+#+END_SRC
+
+
+* The Strategy Shift: Evaluating Operands Later
+
+To implement custom control structures like ~unless~, Sussman introduces
+explicit parameter declarations that tell the interpreter to delay
+certain arguments. He admits this is a bit of a "kluge" (a
+messy workaround) because it fundamentally changes how the evaluator
+works and might conflict with future type declarations used by
+compilers.
+
+In the standard model, the interpreter evaluates the procedure and *all*
+operands before applying them. With this new modification,
+the interpreter must wait: it cannot evaluate the operands to produce
+arguments until it has first examined the procedure to see what its
+declarations look like.
+
+* Implementing Delay: The "Thunk"
+
+When an argument is delayed, it isn't just a piece of dormant code. It
+must remember the context in which it was written. Therefore, the
+evaluator attaches the caller's environment to the delayed
+expression.
+
+This package (expression + environment) is wrapped inside a procedure
+of zero arguments.
+
+- Sussman notes this is historically called a *"thunk"*.
+- The term originated in the ALGOL community, allegedly mimicking the
+  sound of an object being pushed onto a stack.
+
+** GEVLIST vs. EVLIST
+
+To handle this new complexity, the interpreter uses two different list
+evaluators:
+
+- *evlist:* Evaluates all operands normally (forces them).
+- *gevlist:* Looks at the parameter declarations. If the parameter
+  is normal, it evaluates the expression (applicative order); if it is
+  declared "by name," it wraps the expression and environment into a
+  delay.
+
+* The Forcing Boundary: When do we actually need the data?
+
+If we pass promises (thunks) around indefinitely, no actual
+computation ever happens. The interpreter must know when to "undelay"
+or *force* a thunk to get its real value.
+
+Sussman identifies key places where forcing is mandatory:
+
+1. *Conditionals:* Procedures like ~cond~ or ~if~ *must* force their
+   predicate operand because they absolutely need to know if the
+   result is true or false to decide which branch to take[cite: 5].
+2. *Primitive Operations:* Hardware-level primitives (like ~+~ or ~*~)
+   must force their arguments because they have to look at the actual
+   bits to crunch the numbers together.
+
+* Lazy Data Structures
+
+During the Q&A, a student (Vesko) asks if it is ever reasonable to
+call a primitive procedure by name. Sussman confirms that it
+is highly useful for data structures.
+
+- *Constructors (~cons~):* It is completely unnecessary to evaluate
+  arguments when making an array or a pair. You can simply
+  ~cons~ together two promises.
+- *Selectors (~car~, ~cdr~):* These don't do any work; they just route the
+  promises and pass them along to someone else.
+- *Predicates:* Functions that ask "Is this a pair?" or "Is this a
+  symbol?" *must* force the data, because they have to inspect the
+  object to find out what it is.
+
+* Elisp Demonstration: Thunks and Forcing
+
+We can simulate this "Call-by-Name" mechanism in Elisp by manually
+creating thunks. Notice how the delayed division by zero never crashes
+the program because we never force it!
+
+#+BEGIN_SRC elisp
+  (setq lexical-binding t)
+
+  ;; A "Thunk" is just a lambda with 0 arguments that captures its environment
+  (defmacro make-thunk (expr)
+    `(lambda () ,expr))
+
+  (defun force-thunk (thunk)
+    "Recursively undelays a thunk until a real value is found."
+    (if (functionp thunk)
+        (force-thunk (funcall thunk))
+      thunk))
+
+  ;; Our custom 'unless' implemented with thunks
+  (defun my-unless (predicate consequent-thunk alternative-thunk)
+    (if (not predicate)
+        (force-thunk consequent-thunk)
+      (force-thunk alternative-thunk)))
+
+  ;; Test: If 1 == 0, evaluate 2. Otherwise, divide 1 by 0.
+  ;; Because 1 != 0, the alternative-thunk (/ 1 0) is NEVER forced. No crash!
+  (princ (format "Result: %s\n"
+                 (my-unless (= 1 0)
+                            (make-thunk 2)
+                            (make-thunk (/ 1 0)))))
+#+END_SRC
