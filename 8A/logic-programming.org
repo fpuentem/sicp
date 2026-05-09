@@ -1,0 +1,322 @@
+#+TITLE: Lecture 8A: Part 1 - Logic Programming & Declarativity
+#+AUTHOR: Fabricio Puente-Mansilla
+#+DATE: <2026-05-09 Sat>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Overview: Procedural vs. Declarative Knowledge
+
+In previous lectures, the focus was on how to construct languages like
+Lisp using ~EVAL~ and ~APPLY~. These are *procedural languages*, which
+focus on "how-to" knowledge—the rules of strategy.
+
+Logic programming introduces a different paradigm: *Declarative
+Knowledge*.
+
+- *Procedural (Lisp/C):* Concentrates on the steps required to achieve
+  a result.
+- *Declarative (Logic):* Concentrates on what is true. It describes
+  the logical relationships between entities.
+
+* Procedural vs. Declarative Knowledge
+
+Professor Sussman introduces a fundamental shift in programming paradigms:
+
+** Procedural Knowledge ("How-to")
+
+Procedural knowledge is about the "rules of strategy." It tells the
+computer exactly what steps to take to achieve a goal.
+
+- Example: In Chess, procedural knowledge would be the strategy for
+  how to move pieces to win.
+- Example: In Math, $y = \sqrt{x}$ as a procedure is the sequence of
+  guesses and averages (like Heron's method) used to find the value.
+
+** Declarative Knowledge ("What-is")
+
+Declarative knowledge is about "what is true." It describes the
+relationships between entities without dictating how to find them.
+
+- Example: In Chess, declarative knowledge is the set of rules
+  defining a legal move or a checkmate.
+- Example: In Math, $y^2 = x$ and $y \geq 0$ is a declarative
+  definition of a square root.
+
+
+* The "Merge" Example
+
+To illustrate the difference, consider the task of merging two sorted
+lists into one.
+
+** The Procedural Approach (Lisp)
+
+In a procedural language, we define a sequence of tests and
+actions. If list ~x~ is empty, the result is ~y~. If the first element of
+~x~ is smaller than the first element of ~y~, we ~cons~ the first element of
+~x~ onto the result of merging the rest.
+
+#+BEGIN_SRC elisp :results silent
+  (defun my-merge (x y)
+    (cond ((null x) y)
+          ((null y) x)
+          (t (let ((a (car x)) (b (car y)))
+               (if (< a b)
+                   (cons a (my-merge (cdr x) y))
+                 (cons b (my-merge x (cdr y))))))))
+#+END_SRC
+
+** The Declarative Approach (Logic)
+
+In logic programming, we do not write a "procedure." Instead, we state
+a set of logical deductions (rules).
+
+If we know that:
+
+1. For any list ~y~, merging an empty list and ~y~ results in ~y~.
+2. For any list ~x~, merging ~x~ and an empty list results in ~x~.
+3. If ~cdr(x)~ and ~y~ merge to form ~z~, AND ~a < car(y)~, then ~(a . cdr(x))~
+   and ~y~ merge to form ~(a . z)~.
+4. If ~x~ and ~cdr(y)~ merge to form ~z~, AND ~b < car(x)~, then ~x~ and ~(b
+   . cdr(y))~ merge to form ~(b . z)~.
+
+* The Power of Bidirectionality
+
+The most significant advantage of the logic approach is that
+relationships are *bidirectional*. In a procedural language, a
+function has a fixed input and a fixed output. In logic programming,
+you provide a relation and the system can solve for any missing piece.
+
+** Forward Direction:
+
+"What is the result of merging ~(1 3)~ and ~(2 4)~?"
+The system uses the rules to deduce the answer: ~(1 2 3 4)~.
+
+** Backward Direction (Queries):
+
+"What lists ~x~ and ~y~ can be merged to form ~(1 2 3)~?"
+The logic system will find all possible combinations that satisfy the rules:
+- ~()~ and ~(1 2 3)~
+- ~(1)~ and ~(2 3)~
+- ~(1 2)~ and ~(3)~
+- ~(1 2 3)~ and ~()~
+- ...and so on.
+
+* Why Logic Programming?
+
+The programmer is often overwhelmed by the "How" (control flow). In
+complex systems, the logic of the problem becomes tangled with the
+strategy used to solve it.  Logic programming attempts to separate the
+*Logic* from the *Control*.
+
+- *The Ideal:* You provide the logic, and the underlying system handles the control (the search for the answer).
+
+* Summary of Key Concepts
+- *Imperative:* A sequence of instructions for a machine to follow.
+- *Declarative:* A set of relations describing the "shape" of the answer.
+- *Relations vs. Functions:* Functions map inputs to outputs; relations describe how values belong together.
+
+---
+
+* Functions vs. Relations: A Paradigm Shift
+
+Professor Abelson highlights a "big difference" between the procedural
+code we have written so far and logic rules.
+
+** The Procedural "Box" (Functions)
+
+Most programming follows a "box" model with defined inputs and
+outputs.
+
+- In the =merge= procedure, we have a box where =x= and =y= go in, and a
+  single answer comes out.
+- This model is *directed*: you specify the inputs to get the
+  output.
+
+** The Logic Relation
+
+Logic rules describe a *relation* between entities (e.g.,
+=merge-to-form=) rather than a sequence of steps.
+
+- Instead of a function of =x= and =y=, we have a relation between three
+  things: =x=, =y=, and the result =z=.
+- Crucially, we do *not* specify which is the input and which is the
+  output.
+
+* Key Characteristics of Logic Programming
+
+Abelson identifies two major differences between logic programming and
+traditional languages.
+
+** Lack of Directionality
+
+Because we specify relations, the knowledge is undirected. The same
+set of rules can answer multiple types of questions:
+
+- *Forward:* ~(1 3 7)~ and ~(2 4 8)~ merge to form what?
+- *Filling the Gap:* ~(1 3 7)~ and what merge to form ~(1 2 3 4 7 8)~?
+- *Decomposition:* What and what else merge to form ~(1 2 3 4 7 8)~?
+
+** Multiple Answers
+
+Unlike functions, which typically return one result, a relation can
+have a whole bunch of answers.
+
+- For the decomposition question above, there are $2^6$ possible
+  answers (e.g., ~1~ and the rest, ~1 2~ and the rest, etc.).
+- The logic system is responsible for deducing all valid
+  solutions.
+
+* The Query Language
+
+The lecture focuses on implementing a logic programming system within
+Lisp.
+
+** Philosophy of the Language
+
+The goal is threefold:
+
+- Use logic to *express* what is true.
+- Use logic to *check* whether something is true.
+- Use logic to *find out* what is true.
+
+** Implementation Details
+
+- *The Best Known:* Prolog is the most famous logic programming
+  language.
+- *The Query Language:* The system implemented in the lecture captures
+  the "essence of Prolog".
+- *Performance:* Because it is interpreted on top of the Lisp
+  interpreter rather than built as a dedicated compiler, it is
+  significantly slower than professional systems.
+
+* Summary for Background Reading
+
+- *Functions* are directional (Input -> Output).
+- *Relations* are non-directional (Connections between values).
+- Logic programming allows you to solve for any part of a relation
+  using the same logic.
+
+ ---
+
+* Compound Queries: Logic Gates for Information
+
+The Query Language allows for complex information retrieval by
+combining primitive queries using logical operators.
+
+** Conjunction (~and~)
+
+The ~and~ operator finds all sets of variable bindings that satisfy all
+the sub-queries simultaneously.
+
+- Example: "Find all people who work in the Computer division AND are
+  supervised by Ben Bitdiddle."
+- Query: ~(and (job ?person (computer . ?type)) (supervisor ?person
+  (Bitdiddle Ben)))~
+
+** Disjunction (~or~)
+
+The ~or~ operator finds bindings that satisfy *at least one* of the sub-queries.
+
+- Example: "Find all people supervised by Ben Bitdiddle OR Alyssa
+  P. Hacker."
+- Query: ~(or (supervisor ?person (Bitdiddle Ben)) (supervisor ?person
+  (Hacker Alyssa P.)))~
+
+** Negation (~not~)
+
+The ~not~ operator filters out bindings that satisfy a given query.
+
+- Example: "Find all supervisors who are NOT in the Computer division."
+- Query: ~(and (supervisor ?person ?x) (not (job ?x (computer . ?type))))~
+
+
+
+[Image of logic gate AND OR NOT]
+
+
+* Interfacing with Lisp: ~lisp-value~
+
+Sometimes, pure logic is insufficient for tasks like arithmetic or
+precise comparisons. The Query Language provides a "trapdoor" into
+Lisp called ~lisp-value~.
+
+- *Usage:* ~(lisp-value <predicate> <arg1> <arg2> ...)~
+- *Example:* "Find all employees whose salary is greater than $30,000."
+- *Query:* ~(and (salary ?person ?amount) (lisp-value > ?amount 30000))~
+
+** The Limitation of ~lisp-value~
+
+Unlike pure logic relations, ~lisp-value~ is *unidirectional*. It cannot
+"solve" for a value; it can only test values that are already bound by
+other parts of the query. If you ask ~(lisp-value > ?x 30000)~ without
+binding ~?x~ first, the system will error because Lisp's ~>~ function
+requires actual numbers to run.
+
+* Rules: Abstracting Logical Relationships
+
+Rules allow us to name complex logical relationships, acting as the
+"procedures" of the logic world.
+
+** Anatomy of a Rule
+
+A rule consists of a *conclusion* and a *body*.
+
+- ~rule (conclusion) (body)~
+- "If the body is true, then the conclusion is true."
+
+** Example: The `lives-near` Relation
+
+Two people live near each other if they live in the same town,
+provided they are not the same person.
+
+#+BEGIN_SRC lisp
+  (rule (lives-near ?person1 ?person2)
+      (and (address ?person1 (?town . ?rest1))
+           (address ?person2 (?town . ?rest2))
+           (not (same ?person1 ?person2))))
+#+END_SRC
+
+* The "Not" Problem: Closed World Assumption
+
+Professor Sussman notes a critical philosophical point about the ~not~
+operator in logic programming.
+- In classical logic, ~not P~ means $P$ is false.
+- In logic programming, ~not P~ means the system *failed to find a proof* for $P$.
+
+This is known as the *Closed World Assumption*. The system assumes
+that if it doesn't know a fact, that fact must be false. This can lead
+to unexpected results if the database is incomplete.
+
+* Summary: The Query Language as a Tool
+
+1. *Deductive Power:* By combining primitive facts with rules, the
+   system can perform complex reasoning that feels like "thinking."
+2. *Abstractions:* Rules allow us to hide complexity. We can query
+   ~(lives-near ?x ?y)~ without caring how "nearness" is defined.
+3. *The Balance:* While logic is powerful, we occasionally use
+   ~lisp-value~ to leverage the efficiency of procedural math.
+
+* Elisp Demonstration: Simulating a Logic Filter
+
+While we haven't built the full Query Evaluator yet, we can simulate
+the "And/Not" filtering logic using standard Emacs Lisp lists to
+understand the data flow.
+
+#+BEGIN_SRC elisp
+  (setq database '((Hacker Alyssa (computer programmer))
+                   (Bitdiddle Ben (computer wizard))
+                   (Reasoner Louis (computer trainee))
+                   (Warbucks AJ (administration bigshot))))
+
+  (defun get-computer-employees (db)
+    "Simulates: (job ?x (computer . ?type))"
+    (cl-remove-if-not (lambda (emp) (eq (nth 2 emp) 'computer)) db))
+
+  (defun filter-not-trainee (employees)
+    "Simulates: (and ... (not (job ?x (... trainee))))"
+    (cl-remove-if (lambda (emp) (eq (nth 3 emp) 'trainee)) employees))
+
+  ;; Executing the combined 'Logic'
+  (princ (format "Experienced Computer Staff: %s\n"
+                 (filter-not-trainee (get-computer-employees database))))
+#+END_SRC
