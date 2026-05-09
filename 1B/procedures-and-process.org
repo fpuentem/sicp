@@ -1,0 +1,426 @@
+#+TITLE: Procedures and Process; The Substitution Model
+#+AUTHOR: Fabricio Puente-Mansilla
+#+DATE: <2026-05-09 Sat>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Overview: Procedure vs. Process
+
+Professor Abelson begins by making a critical distinction between two
+concepts:
+
+- *Procedure:* The "spell" or the pattern of rules we write down (the
+  source code).
+- *Process:* The "spirit" that lives inside the computer. It is the
+  actual behavior that unfolds over time as the procedure is executed.
+
+* The Black Box Abstraction
+
+A key part of the first part is the idea of *Composition*. We
+build complex systems by treating procedures as "black
+boxes".
+
+When we define ~SOS~ (Sum of Squares), we don't care how ~SQUARE~ is
+implemented. We only care about its "transfer function": it takes an
+input and returns a result. This allows us to build a hierarchy of
+complexity without our minds exploding.
+
+* The Substitution Model
+
+How does the computer actually evaluate an expression? Abelson
+introduces the *Substitution Model*.
+
+** The Evaluation Rule
+
+To evaluate a combination (an expression in parentheses):
+
+1. Evaluate the sub-expressions (the operator and the operands).
+2. Apply the procedure (the value of the operator) to the arguments
+   (the values of the operands).
+3. *The Substitution Step:* Replace the formal parameters of the
+   procedure with the actual arguments, and then evaluate the body of
+   the procedure.
+
+** Example Trace: (SOS 3 4)
+
+Let's trace this like the interpreter. Assume we have defined ~SQUARE~
+and ~SOS~.
+
+#+BEGIN_SRC elisp :results silent
+  (defun square (x) (* x x))
+  (defun sos (x y) (+ (square x) (square y)))
+#+END_SRC
+
+The substitution goes like this:
+1. ~(sos 3 4)~
+2. Evaluate ~sos~, ~3~, and ~4~.
+3. Substitute ~3~ for ~x~ and ~4~ for ~y~ in the body of ~sos~:
+   ~(+ (square 3) (square 4))~
+4. Now evaluate the sub-expressions of the ~+~:
+   - Evaluate ~(square 3)~ $\rightarrow$ ~(* 3 3)~ $\rightarrow$ ~9~
+   - Evaluate ~(square 4)~ $\rightarrow$ ~(* 4 4)~ $\rightarrow$ ~16~
+5. The expression becomes:
+   ~(+ 9 16)~
+6. Result: **25**
+
+* Special Forms: Conditionals (~if~)
+
+Not everything follows the "evaluate all sub-expressions first"
+rule. These exceptions are called *Special Forms*.
+
+The most important one is ~if~. If ~if~ followed the standard rule, it
+would evaluate *both* the "true" branch and the "false" branch before
+deciding which one to use. This would make recursion impossible (it
+would loop forever).
+
+** The ~if~ Rule:
+
+~(if <predicate> <consequent> <alternative>)~
+
+1. Evaluate the ~<predicate>~.
+2. If it yields true, evaluate the ~<consequent>~.
+3. Otherwise, evaluate the ~<alternative>~.
+
+* Elisp Practice: The Substitution "Mental Debugger"
+
+Use the ~pp-macroexpand-last-sexp1~ tool we discussed earlier to see how
+Lisp expands things, but for the substitution model, try to do it
+manually in a comment block.
+
+#+BEGIN_SRC elisp
+  ;; Exercise: Trace (sos (+ 1 2) (square 2))
+  ;; 1. Evaluate (+ 1 2) -> 3
+  ;; 2. Evaluate (square 2) -> 4
+  ;; 3. (sos 3 4)
+  ;; 4. ... (rest of the trace above) ...
+#+END_SRC
+
+* The "Shape" of a Process
+
+In Lisp, we distinguish between the *Procedure* (the code you write)
+and the *Process* (the behavior that evolves). A recursive
+procedure can generate either a recursive process or an iterative
+process depending on how it is structured.
+
+* Two Ways to Add
+
+Professor Abelson presents two different ways to implement addition
+using only increment (~1+~) and decrement (~1-~) primitives.
+
+** Linear Recursive Process
+
+#+BEGIN_SRC elisp :results silent
+  (defun my/+ (x y)
+    (if (= x 0)
+        y
+      (1+ (+ (1- x) y))))
+#+END_SRC
+
+** Linear Iterative Process
+
+#+BEGIN_SRC elisp :results silent
+  (defun my/other/+ (x y)
+    (if (= x 0)
+        y
+      (+ (1- x) (1+ y))))
+#+END_SRC
+
+* The Substitution Model Trace
+
+Analyzing these via the substitution model reveals their "shapes"
+during execution.
+
+** The Recursive Shape: Expansion and Contraction
+
+When evaluating the first procedure for ~(+ 3 4)~, the process builds up
+a chain of deferred operations:
+
+#+BEGIN_COMMENT
+Here we are considering + as my/+, because change the definition of +
+in all the system affects other functionality.
+#+END_COMMENT
+
+#+BEGIN_EXAMPLE
+(+ 3 4)
+(1+ (+ 2 4))
+(1+ (1+ (+ 1 4)))
+(1+ (1+ (1+ (+ 0 4))))  ; Expansion phase complete
+(1+ (1+ (1+ 4)))        ; Contraction phase begins
+(1+ (1+ 5))
+(1+ 6)
+7
+#+END_EXAMPLE
+
+- *Expansion:* The process builds a "hidden" state of work that must
+  be done later (the deferred ~1+~ calls).
+- *Complexity:* Both Time and Space grow linearly with $X$
+  ($O(X)$).
+
+** The Iterative Shape: Constant Width
+
+In the second procedure, the state is fully captured by the variables
+at every step:
+
+#+BEGIN_EXAMPLE
+(+ 3 4)
+(+ 2 5)
+(+ 1 6)
+(+ 0 7)
+7
+#+END_EXAMPLE
+
+- *State Capture:* If the computer crashed at the third step, you
+  could restart it simply by providing the values ~1~ and ~6~.
+- *Complexity:* Time grows linearly ($O(X)$), but *Space is Constant
+  ($O(1)$)* because no deferred work is stored.
+
+* Deep Dive: The Programmer's Mental Model
+
+** The "Restart" Test
+
+A key way to distinguish these is to ask: "If I stopped the computer
+mid-execution, what would I need to tell it to get it going again?"
+
+- In the *Iterative* process, you only need the current values of the
+  variables.
+- In the *Recursive* process, you would also need to explain "where
+  you are" in the chain of deferred operations.
+
+** Memory and Stack Frames
+
+For those used to languages like C or Python, the *Linear Recursive
+Process* is what usually happens during a standard recursive call:
+each call adds a new layer to the stack.
+
+The *Linear Iterative Process* in Lisp is unique because, despite
+being written as a recursive function, it executes in constant
+space. This is often called *Tail Call Optimization*. The interpreter
+recognizes that there is no work left to do after the recursive call,
+so it doesn't need to keep the old "frame" around.
+
+* Summary of Complexities
+
+| Process Type     | Time Complexity | Space Complexity |
+|------------------+-----------------+------------------|
+| Linear Recursive | $O(n)$          | $O(n)$           |
+| Linear Iterative | $O(n)$          | $O(1)$           |
+
+* The "Shape" of Complexity
+
+Previously, we looked at processes that grow linearly. Now, we examine
+a process that branches out like a tree. Understanding the difference
+between how much *Time* (steps) and how much *Space* (memory/stack) a
+process takes is vital for efficient engineering.
+
+** Formal Notation: Big O ($O$)
+
+When we talk about complexity, we use $O(n)$ to describe how resources
+grow as the input $n$ increases.
+
+- *Time Complexity:* Proportional to the number of "points" (steps)
+  the process takes to complete.
+- *Space Complexity:* Proportional to the maximum "width" or "depth"
+  of the process at any single moment.
+
+* Tree Recursion: The Fibonacci Example
+
+The Fibonacci sequence is defined by the following logic:
+
+- $Fib(0) = 0$
+- $Fib(1) = 1$
+- $Fib(n) = Fib(n-1) + Fib(n-2)$ for $n > 1$
+
+** The Procedure
+
+In Lisp, the code mirrors the mathematical definition exactly.
+
+#+BEGIN_SRC elisp :results silent
+  (defun fib (n)
+    (cond ((= n 0) 0)
+          ((= n 1) 1)
+          (t (+ (fib (- n 1))
+                (fib (- n 2))))))
+#+END_SRC
+
+** The Process Shape
+
+Evaluating ~(fib 4)~ creates a tree structure. To compute ~(fib 4)~, the
+computer must compute ~(fib 3)~ and ~(fib 2)~. Those, in turn, branch
+further.
+
+** Analyzing Resources
+
+- *Time ($O(\phi^n)$):* The number of nodes in the tree grows
+  exponentially. Specifically, it grows at the rate of the Golden
+  Ratio ($\phi \approx 1.618$). This is a "horrible" process because
+  adding just one to $n$ multiplies the work required by approximately
+  1.6.
+- *Space ($O(n)$):* Surprisingly, the space required is only
+  linear. At any given moment, the computer only needs to remember the
+  path from the root of the tree down to the current node being
+  evaluated. The depth of the tree is $n$.
+
+* Mental Model: Tree Recursion vs. Linear Recursion
+
+For those moving from imperative languages like C or Python, it is
+important to visualize the difference in "work":
+
+- *Linear Recursion:* Like walking down a flight of stairs. You take
+  $n$ steps and remember $n$ previous steps.
+- *Tree Recursion:* Like a binary tree search. You still only have one
+  "path" in memory at a time (linear space), but the total number of
+  locations you must visit is massive (exponential time).
+
+* The Hidden Cost of Redundancy
+
+Why is this specific Fibonacci process so expensive? Look at the tree:
+
+- ~(fib 2)~ is computed multiple times.
+- ~(fib 1)~ is computed even more.
+
+The process has no "memory" of previous calculations; it blindly
+re-computes the same values over and over again. This provides a
+perfect bridge to the next topic: *Iterative Fibonacci*, which avoids
+this redundancy.
+
+* Complexity Comparison Summary
+
+| Process Type      | Time Complexity | Space Complexity |
+|-------------------+-----------------+------------------|
+| Linear Iterative  | $O(n)$          | $O(1)$           |
+| Linear Recursive  | $O(n)$          | $O(n)$           |
+| Tree Recursive    | $O(\phi^n)$     | $O(n)$           |
+
+* Elisp Lab: Timing the Tree
+
+You can use the ~benchmark~ tool in Emacs to see how the exponential
+time complexity hits a "wall" as $n$ increases.
+
+#+BEGIN_SRC elisp
+  (defun fib (n)
+    (cond ((= n 0) 0) ((= n 1) 1)
+          (t (+ (fib (- n 1)) (fib (- n 2))))))
+
+  (princ (format "Fib(10) time: %s\n" (benchmark-run 1 (fib 10))))
+  (princ (format "Fib(20) time: %s\n" (benchmark-run 1 (fib 20))))
+  ;; Be careful calling (fib 40) or higher, as it will take a long time!
+#+END_SRC
+
+#+RESULTS:
+: Fib(10) time: (4.9962e-05 0 0.0)
+: Fib(20) time: (0.005758976000000001 0 0.0)
+
+* Extra Material for Discovery
+
+If you are interested in how to optimize the tree process, look into these concepts:
+
+- *Memoization:* A technique to store results of function calls to
+  avoid re-computation.
+- *Dynamic Programming:* The general strategy of breaking a problem
+  into sub-problems and building up the solution (similar to the
+  iterative Fibonacci approach).
+
+---
+
+* The "Memory" of a Tree
+
+While we've established that tree recursion (like the Fibonacci
+example) results in an "exponential explosion" of time, its space
+requirements are far more modest. The computer does not need to store
+the entire tree in memory; it only needs to remember the path back to
+the root to know what work is left to do.
+
+* Space Complexity: The Path back to the Root
+
+The amount of space a process takes is proportional to the amount of
+information the computer must "keep in mind" to continue running.
+
+- In a tree-recursive process, this space is proportional to the
+  *depth of the tree*.
+- For a recursive Fibonacci of $n$, the depth is $n$.
+- Therefore, Space Complexity is *$O(n)$*.
+
+* The Tower of Hanoi: A Case Study in $O(2^n)$
+
+The Tower of Hanoi is a classic problem: moving $n$ disks from one
+spike to another using an intermediate spike, without ever placing a
+larger disk on a smaller one.
+
+** The Procedure
+
+The solution is a recursive "spell" where we reduce the problem of $n$
+disks into two problems of $n-1$ disks.
+
+#+BEGIN_SRC elisp :results silent
+  (defun move-tower (n from to extra)
+    (if (= n 0)
+        'done
+      (progn
+        (move-tower (1- n) from extra to)
+        (princ (format "Move disk %s from %s to %s\n" n from to))
+        (move-tower (1- n) extra to from))))
+#+END_SRC
+
+** The Cost of Solving Hanoi
+
+- *Time ($O(2^n)$):* To move $n$ disks, you must do twice the work of
+  moving $n-1$ disks, plus one move. This leads to $2^n - 1$ total
+  moves.
+- *Space ($O(n)$):* Like Fibonacci, the computer only needs to
+  remember its current depth in the recursive "tree" of
+  moves.
+
+* Optimization: Saving Intermediate Work
+
+Abelson concludes by hinting at how to fix the "horrible" exponential
+time of tree recursion. One method is to *remember the table* of
+previous results so you never compute the same branch
+twice.
+
+- This is the basis for *Memoization*.
+- By storing intermediate results, an $O(2^n)$ tree process can be
+  collapsed into an $O(n)$ linear process.
+
+* Comparison for Python and C Developers
+
+- *Stack Depth:* In C, this linear space ($O(n)$) corresponds directly
+  to the maximum number of stack frames active. While the total number
+  of calls is exponential, the peak memory usage is only proportional
+  to $n$.
+- *Tail Recursion:* Note that the Hanoi procedure is *not*
+  tail-recursive because there is work (the second `move-tower` call)
+  after the first one. This is why it remains a tree process rather
+  than an iterative one.
+
+* Summary Table of Complexities
+
+| Algorithm        | Time Complexity | Space Complexity |
+|------------------+-----------------+------------------|
+| Linear Fibonacci | $O(n)$          | $O(1)$           |
+| Recursive Fib    | $O(\phi^n)$     | $O(n)$           |
+| Tower of Hanoi   | $O(2^n)$        | $O(n)$           |
+
+
+* Elisp Lab: Running Hanoi
+
+You can run a small version of the tower in your Emacs buffer to see
+the moves printed out.
+
+#+BEGIN_SRC elisp
+  (defun move-tower (n from to extra)
+    (unless (= n 0)
+      (move-tower (1- n) from extra to)
+      (princ (format "Move disk from %s to %s\n" from to))
+      (move-tower (1- n) extra to from)))
+
+  (move-tower 3 'A 'C 'B)
+#+END_SRC
+
+#+RESULTS:
+: Move disk from A to C
+: Move disk from A to B
+: Move disk from C to B
+: Move disk from A to C
+: Move disk from B to A
+: Move disk from B to C
+: Move disk from A to C
