@@ -1,0 +1,276 @@
+#+TITLE: Implementing the Query Engine
+#+AUTHOR: Fabricio Puente-Mansilla
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Overview: The Engine Under the Logic
+
+In the previous lecture, we saw *what* the query language does
+(declarative logic programming). Now, we examine *how* it is actually
+implemented.
+
+At the very bottom, the engine relies on two core mechanisms:
+
+1. A *Pattern Matcher* (to compare queries against the database).
+2. A *Stream Processing Architecture* (to handle multiple possible
+   answers).
+
+* Pattern Matching: Variables and Literals
+
+In the logic syntax, literal data matches itself, while variables are
+denoted by a question mark (e.g., ~?x~, ~?person~).
+
+A pattern matcher is a function that takes three inputs:
+
+1. A *Pattern* (e.g., ~(job ?x (computer . ?type))~)
+2. A *Datum* from the database (e.g., ~(job (Bitdiddle Ben) (computer wizard))~)
+3. A *Dictionary* (often called a *Frame*) of existing variable bindings.
+
+If the match is successful, the matcher returns an *extended*
+dictionary. If it fails, it returns a special failure signal.
+
+** The Python / C Mental Model
+
+Think of the Lisp "frame" as a hash map (~dict~ in Python) that stores
+the state of our current hypothesis.  When the matcher aligns the
+pattern and the datum above, it outputs: ~{'?x': '(Bitdiddle Ben)',
+'?type': 'wizard'}~ In C, you might implement this as a linked list of
+key-value structs passed by pointer, where each successful match
+appends a new node to the chain.
+
+* The Core Concept: Streams of Frames
+
+How does the system handle multiple possible answers without getting
+tangled? It uses a pipeline of streams.
+
+A *Primitive Query* (like asking for someone's supervisor) acts as a black box.
+
+- The input to the box is a *Stream of Frames* (a sequence of
+  dictionaries).
+- For every frame that enters the box, the query checks the database
+  to see if it can satisfy the pattern *given the current bindings in
+  that frame*.
+- Because one frame might match multiple database entries, a single
+  incoming frame can result in *multiple* outgoing frames.
+- If it doesn't match anything, zero frames come out (the frame is
+  discarded).
+
+This is structurally identical to a *Python Generator*. You can
+visualize it as:
+
+#+BEGIN_SRC python :eval never
+  def primitive_query(input_stream_of_frames):
+      for frame in input_stream_of_frames:
+          for entry in database:
+              match = pattern_matcher(pattern, entry, frame)
+              if match != "FAILED":
+                  yield match # Yields the extended frame into the output stream
+#+END_SRC
+
+* Implementing Compound Queries (Plumbing)
+
+Because every query takes a stream of frames and returns a stream of
+frames, they have a uniform interface. They can be plugged together
+like plumbing or electronic filters.
+
+** AND (Series / Pipeline)
+
+To implement ~(AND Query1 Query2)~:
+
+- The initial stream of frames is fed into ~Query1~.
+- The *output* stream of ~Query1~ is directly piped as the *input* stream to
+  ~Query2~.
+- Any frame that survives both boxes satisfies both conditions.
+
+** OR (Parallel / Merge)
+
+To implement ~(OR Query1 Query2)~:
+
+- The *same* input stream is fed into both ~Query1~ and ~Query2~
+  independently.
+- The system then interleaves or merges their output streams together
+  into a single stream.
+
+** NOT (Filter)
+
+To implement ~(NOT Query)~:
+
+- It acts as a filter on the stream. For each incoming frame, it
+  attempts to satisfy the query.
+- If the query produces *any* matches for that frame, the frame is
+  *discarded* (because the condition was proven true, making the NOT
+  false).
+- If the query produces *no* matches, the original frame is passed
+  through unaltered.
+
+* Elisp Demonstration: Simulating the Pipeline
+
+We can simulate this "Stream of Frames" concept in Emacs Lisp using
+lists of association lists (alists). Evaluate this block to see how an
+empty frame is expanded by a query, and then filtered by a second
+query.
+
+#+BEGIN_SRC elisp
+  (setq database '(((job . "wizard") (name . "Ben"))
+                   ((job . "programmer") (name . "Alyssa"))
+                   ((job . "trainee") (name . "Louis"))))
+
+  ;; Our starting point: A stream containing one empty frame
+  (setq initial-stream '( () ))
+
+  (defun query-all-employees (input-stream)
+    "Simulates a query that matches every employee in the DB."
+    (let ((output-stream nil))
+      (dolist (frame input-stream)
+        (dolist (entry database)
+          ;; We extend the empty frame with the DB entry
+          (push (append entry frame) output-stream)))
+      output-stream))
+
+  (defun query-not-trainee (input-stream)
+    "Simulates (NOT (job ?x trainee)) acting as a filter."
+    (let ((output-stream nil))
+      (dolist (frame input-stream)
+        ;; If the frame says they are a trainee, drop them.
+        ;; Otherwise, pass them through to the output stream.
+        (unless (string= (cdr (assoc 'job frame)) "trainee")
+          (push frame output-stream)))
+      (nreverse output-stream)))
+
+  ;; The Pipeline: AND (query-all-employees) (query-not-trainee)
+  (princ "Running Stream Pipeline:\n")
+  (let* ((stream-1 (query-all-employees initial-stream))
+         (stream-2 (query-not-trainee stream-1)))
+    (dolist (final-frame stream-2)
+      (princ (format "Result Frame: %s\n" final-frame))))
+#+END_SRC
+
+* The Limits of Pattern Matching
+
+In the previous segment, we used a *Pattern Matcher* to compare a
+query containing variables (e.g., ~?x~) against a literal datum in the
+database.
+
+However, pattern matching is strictly a one-way street. The database
+entry cannot contain variables. To process logical *Rules* (which
+define relationships abstractly and have variables of their own), we
+need a more powerful, two-way matching mechanism called
+*Unification*.
+
+* Memory Management of Dictionaries (Frames)
+
+During the Q&A that opens this segment, a student asks about the
+lifecycle of the dictionaries (frames) generated by the query system.
+
+- *Creation:* When a query processes a stream, the matcher creates new
+  dictionaries dynamically to hold the new variable bindings.
+- *Destruction:* These dictionaries are temporary. Once they flow
+  through the pipeline and are no longer needed (e.g., a frame is
+  discarded by a ~NOT~ filter, or printed to the screen), they become
+  "garbage" and are automatically cleaned up by Lisp's Garbage
+  Collector.
+
+** The C/Python Mental Model
+
+In C, you would have to carefully ~malloc~ and ~free~ these dictionary
+structs as they pass between query filters. In Python, you are used to
+objects being garbage-collected when their reference count drops to
+zero. Lisp operates similarly to Python here: you simply allocate the
+frames (~cons~ cells), and the environment handles the memory
+reclamation.
+
+* Unification: Two-Way Matching
+
+Unification is the generalized form of pattern matching. It takes two
+patterns, *both* of which can contain variables, and attempts to find a
+set of bindings that makes them identical.
+
+** Example of Unification
+
+Suppose we want to unify these two patterns:
+1. ~(?x a ?y)~
+2. ~(?y ?z a)~
+
+The Unifier processes them element by element:
+
+- Element 1: ~?x~ unifies with ~?y~. The system notes that ~?x~ and
+  ~?y~ must be the same thing.
+- Element 2: ~a~ unifies with ~?z~. The system binds ~?z~ to the
+  literal ~a~.
+- Element 3: ~?y~ unifies with ~a~. Since ~?x~ is tied to ~?y~, now
+  ~?x~, ~?y~, and ~?z~ are all bound to ~a~.
+
+If the system encounters a contradiction (e.g., trying to bind ~?x~ to
+~b~ when it is already bound to ~a~), the unification *fails*.
+
+** The Hardware Analogy
+
+Think of unification like connecting wires on a breadboard.
+
+- Pattern matching is like reading a sensor: data flows from the
+  sensor into your variable.
+- Unification is like tying two bi-directional bus lines together. If
+  you tie line ~A~ to line ~B~, and later drive line ~B~ high, line ~A~ is
+  also driven high. They are logically fused.
+
+* Applying Rules
+
+Rules act like the "procedures" of our logic language. They consist of
+a *Conclusion* (the header) and a *Body* (the logic).
+
+When a query asks something that requires a rule, the evaluator
+follows these steps:
+
+1. *Unify the Query with the Conclusion:* The system takes the
+   incoming query frame and unifies it with the rule's conclusion.
+2. *Variable Renaming:* To prevent collisions (what if the query uses
+   ~?x~ and the internal rule also uses ~?x~ for a completely
+   different purpose?), the system renames all variables inside the
+   rule to unique, temporary names before unification.
+3. *Evaluate the Body:* If unification succeeds, the resulting
+   extended frame is passed into the rule's *Body*. The body is
+   evaluated just like a compound query (~AND~, ~OR~, etc.), which
+   eventually yields the final stream of answers.
+
+* The Danger of Infinite Loops
+
+Because the logic evaluator heavily relies on depth-first search to
+evaluate these streams, it is vulnerable to infinite loops.
+
+If a rule is defined recursively (e.g., "A is the boss of B if A
+manages B, OR if A manages someone who is the boss of B"), the system
+might continuously expand the rule infinitely without ever checking
+the base facts. This is a known limitation of the simple depth-first
+evaluation strategy. Professional logic systems (like Prolog) often
+use more advanced search strategies to mitigate this, but it remains a
+fundamental challenge in declarative programming.
+
+* Elisp Demonstration: A Simple Unification Trace
+
+While a full unifier is complex, we can trace the basic logic of
+variable binding in Elisp to see how two variables become "fused" in
+an association list.
+
+#+BEGIN_SRC elisp
+  (setq current-frame nil)
+
+  (defun extend-if-possible (var val frame)
+    "Binds VAR to VAL in the FRAME, checking for contradictions."
+    (let ((existing-binding (assoc var frame)))
+      (if existing-binding
+          (if (equal (cdr existing-binding) val)
+              frame ;; Already bound to the same value, OK
+            'failed) ;; Contradiction!
+        (cons (cons var val) frame)))) ;; Add new binding
+
+  ;; Step 1: Bind ?x to 'a
+  (setq current-frame (extend-if-possible '?x 'a current-frame))
+
+  ;; Step 2: Try to bind ?x to 'b (This will fail)
+  (princ (format "Attempting contradiction: %s\n"
+                 (extend-if-possible '?x 'b current-frame)))
+
+  ;; Step 3: Bind ?y to 'a (This succeeds)
+  (setq current-frame (extend-if-possible '?y 'a current-frame))
+  (princ (format "Final Frame: %s\n" current-frame))
+#+END_SRC
