@@ -1,0 +1,443 @@
+#+TITLE: Register Machines and Hardware Architecture
+#+AUTHOR: Fabricio Puente-Mansilla
+#+DATE:  <2026-05-24 Sun>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Bridging the Gap to Hardware
+
+Up until now, the course has focused on organizing large programs
+using higher-level abstractions (like the Metacircular Evaluator and
+Logic Query systems). But how does a physical machine actually execute
+these expressions?
+
+Professor Sussman introduces the concept of a *Register Machine*
+is a simplified model of a CPU. It allows us to understand how
+high-level Lisp concepts (like recursion and environment frames) are
+eventually translated into physical electrical signals, wires, and
+silicon.
+
+* The Case Study: Greatest Common Divisor (GCD)
+
+To illustrate how a machine computes, Sussman uses Euclid's algorithm
+for finding the Greatest Common Divisor.
+
+** The High-Level Lisp Procedure
+
+In standard Scheme/Lisp, the algorithm is written recursively:
+
+#+BEGIN_SRC elisp :results silent
+  (defun my-gcd (a b)
+    (if (= b 0)
+        a
+      (my-gcd b (% a b)))) ;; % is the remainder operator
+#+END_SRC
+
+To translate this into hardware, we cannot rely on "magic" Lisp
+evaluation. We must build a physical machine that only understands
+basic arithmetic and moving data between storage units.
+
+* Register Machine Architecture
+
+A register machine is divided into two entirely separate components:
+the *Data Paths* and the *Controller*.
+
+** The Data Paths (The Physical Computation)
+
+The data paths are the physical "plumbing" of the machine. They
+consist of:
+
+- *Registers:* Storage units that hold data (like variables). For GCD,
+  we need registers ~A~, ~B~, and a temporary register ~T~.
+- *Operations:* Hardware logic blocks (ALUs) that compute values. For
+  GCD, we need a block that computes the ~remainder~ and a block that
+  tests if a value is ~0~.
+- *Buttons (Control Lines):* Switches that, when pushed, allow data to
+  flow from a register, through an operation block, and into another
+  register.
+- *Light Bulbs (Condition Flags):* Indicators that light up based on
+  data (e.g., a light bulb that turns on if Register ~B~ holds the
+  number 0).
+
+** The Controller (The State Machine)
+
+The controller is the "brain" that sequences the operations. It
+doesn't compute anything itself; it simply pushes the buttons in the
+data path and looks at the light bulbs.
+
+It acts as a Finite State Machine (FSM). For GCD, the controller logic
+looks like this:
+
+1. *test-b:* Look at the "Is B = 0?" light bulb.
+   - If the light is ON, jump to the *done* state.
+   - If the light is OFF, proceed to the next step.
+2. Push the button to compute ~remainder of A / B~ and route the result into register ~T~.
+3. Push the button to route the contents of register ~B~ into register ~A~.
+4. Push the button to route the contents of register ~T~ into register ~B~.
+5. Jump back to *test-b*.
+6. *done:* The answer is now physically stored in register ~A~.
+
+* Defining a Register Machine Language
+
+Drawing physical wiring diagrams takes up too much space and is
+difficult to modify. To solve this, Sussman introduces
+a custom language to describe these hardware machines.
+
+This is a prime example of building a language to solve a specific
+domain problem. The language specifies the registers, the data
+operations, and the controller sequence.
+
+** Hardware Description Language (HDL) vs. Lisp
+
+If you have worked with FPGAs or hardware design, this language is
+conceptually identical to Verilog or VHDL. You define the physical
+storage (registers) and then define the state machine (the controller)
+that manages the flow of electrons between them.
+
+* Elisp Demonstration: Simulating the GCD Register Machine
+
+We can simulate this register machine in Elisp using an imperative
+loop, which mirrors how the physical controller jumps between
+states. Notice how we use a temporary variable ~T~ to avoid corrupting
+data during the swap, exactly like the physical registers do.
+
+#+BEGIN_SRC elisp
+  (defun simulate-gcd-machine (a-init b-init)
+    "Simulates the hardware state machine for GCD."
+    (let ((reg-A a-init)
+          (reg-B b-init)
+          (reg-T 0))
+
+      ;; The Controller (Simulated via a while loop)
+      (while (not (= reg-B 0))
+        ;; Step 1: Compute remainder and store in T
+        (setq reg-T (% reg-A reg-B))
+
+        ;; Step 2: Move B to A
+        (setq reg-A reg-B)
+
+        ;; Step 3: Move T to B
+        (setq reg-B reg-T))
+
+      ;; Machine halts. Result is in A.
+      (princ (format "GCD Machine halted. Result in Register A: %s\n" reg-A))))
+
+  ;; Test the machine
+  (simulate-gcd-machine 206 40)
+#+END_SRC
+
+#+RESULTS:
+: GCD Machine halted. Result in Register A: 2
+
+* Formalizing the Machine
+
+In the first part, we drew diagrams for the GCD data paths and
+controller. However, physical wiring diagrams do not scale; a diagram
+for the full Lisp evaluator would take up multiple chalkboards. To
+solve this, Sussman formalizes the hardware description using a
+textual Register Machine Language.
+
+* The Register Machine Language
+
+The language uses Lisp-like symbolic expressions to define the
+hardware. This allows us to represent a machine computationally,
+opening the door to writing software simulators and silicon compilers.
+
+** Machine Definition Structure
+
+A machine is defined by its registers, its operations, and its
+controller sequence.
+
+#+BEGIN_SRC scheme :eval never
+  (define-machine gcd
+    (registers a b t)
+    (controller
+     test-b
+       (test (op =) (reg b) (const 0))
+       (branch (label gcd-done))
+       (assign t (op rem) (reg a) (reg b))
+       (assign a (reg b))
+       (assign b (reg t))
+       (goto (label test-b))
+     gcd-done))
+#+END_SRC
+
+Notice how the controller is just a sequence of labels and
+instructions. This maps perfectly to the Finite State Machine (FSM)
+concept.
+
+* Subroutines: Reusing Hardware
+
+If we are designing a massive chip, we don't want to instantiate an
+entirely new GCD data path every time we need to compute a common
+divisor. We want to route data to our existing GCD block, let it run,
+and then route the answer back to the correct part of our program.
+
+** The continue Register
+
+To use GCD as a subroutine from multiple places in a larger program,
+the GCD controller needs to know where to jump back to when it
+finishes.
+
+- We introduce a special register called ~continue~.
+- Before jumping to the GCD subroutine, the main controller assigns
+  the return label to ~continue~.
+- Instead of a hardcoded ~(goto (label gcd-done))~, the subroutine ends
+  with a dynamic jump: ~(goto (reg continue))~.
+
+When designing bare-metal firmware for Embedded Linux Processors or
+modern RISC architectures, this concept is identical to the Link
+Register (e.g., ~ra~ in RISC-V), which holds the return address of the
+calling function.
+
+* The Recursion Problem and The Stack
+
+The ~continue~ register works perfectly for a single level of
+subroutines. But what happens if Subroutine A calls Subroutine B?
+
+1. Subroutine A is called, and ~continue~ is set to return to the Main
+   program.
+2. Inside Subroutine A, it calls Subroutine B, and overwrites ~continue~
+   to return to Subroutine A.
+3. Subroutine B finishes and returns to Subroutine A.
+4. Subroutine A finishes, looks at ~continue~... but the original return
+   address to Main is permanently lost (clobbered)!
+
+This is the fundamental problem with recursive processes. A static
+machine with a fixed number of registers cannot remember an
+arbitrarily deep history of nested calls.
+
+** The Solution: Memory as a Stack
+
+To simulate an "infinite" machine that can handle arbitrarily deep
+recursion, we connect the register machine to a new memory structure:
+*The Stack*.
+
+- The stack is a Last-In, First-Out (LIFO) data structure.
+- *save*: Pushes the current value of a register onto the top of the
+  stack.
+- *restore*: Pops the top value off the stack and places it back into a
+  register.
+
+Before a nested call overwrites important state (like the ~continue~
+register or local variables), the machine saves those values to the
+stack. When the call returns, it restores them, seamlessly
+reconstructing the previous state.
+
+* Elisp Demonstration: Implementing a Hardware Stack
+
+We can model the hardware stack in Emacs Lisp using a simple list. In
+Lisp, the ~push~ and ~pop~ macros map directly to the hardware concepts of
+saving and restoring state across time.
+
+#+BEGIN_SRC elisp
+  ;; The hardware stack is just a list in our simulation
+  (setq hardware-stack nil)
+
+  (defun sim-save (value)
+    "Simulates pushing a value to the hardware stack."
+    (push value hardware-stack))
+
+  (defun sim-restore ()
+    "Simulates popping a value from the hardware stack."
+    (if hardware-stack
+        (pop hardware-stack)
+      (error "Stack underflow!")))
+
+  ;; Simulate a nested subroutine scenario:
+  (setq reg-continue 'return-to-main)
+
+  ;; About to call a nested sub-routine! Save the current continue register.
+  (sim-save reg-continue)
+  (princ (format "Saved to stack. Stack is now: %s\n" hardware-stack))
+
+  ;; Subroutine overwrites the register
+  (setq reg-continue 'return-to-sub-a)
+
+  ;; Subroutine finishes, restore the old state!
+  (setq reg-continue (sim-restore))
+  (princ (format "Restored from stack. reg-continue is back to: %s\n" reg-continue))
+#+END_SRC
+
+* Computing Factorial in Hardware
+
+We now apply the stack memory concept to a classic recursive problem:
+computing a factorial. Unlike the GCD algorithm, which is iterative
+and can be solved with a simple state loop, factorial requires the
+machine to "remember" deferred operations (multiplying the result by
+~N~) after returning from the nested subroutine.
+
+* The Factorial Data Paths
+
+To build the factorial register machine, Professor Sussman identifies
+the specific physical pathways required:
+
+- *Registers:* We need an ~N~ register (the number we are computing the
+  factorial of) and a ~VAL~ register (where the final answer will be
+  stored).
+- *Operations:* A multiplier hardware block is needed to sample the
+  values of ~N~ and ~VAL~ and route the computed result back into
+  ~VAL~. We also need a decrementer block that takes ~N~,
+  subtracts 1, and routes it back into ~N~.
+- *Flags:* A light bulb (comparator) is required to test if ~N = 1~,
+  which signals our base case.
+
+* The Controller: Pushing and Popping
+
+When designing the controller for this recursive process, we must use
+the stack carefully to prevent our data from being clobbered during
+the nested calls.
+
+When the machine computes $N!$, it must first compute $(N-1)!$.
+
+1. *Save:* Before jumping into the $(N-1)$ subroutine, the machine
+   must save the current value of ~N~ onto the stack (because we will
+   need that specific ~N~ later for the multiplication). It must also
+   save the ~continue~ register to preserve the return address.
+2. *Execute:* The machine decrements ~N~, assigns the ~continue~ register
+   to the ~after-fact~ label, and jumps back to the start of the
+   factorial loop.
+3. *Restore:* Once the base case is reached (~N=1~), the machine routes
+   ~1~ into ~VAL~ and returns. It then pops the old ~N~ and the old ~continue~
+   address off the stack.
+4. *Compute:* Finally, it activates the multiplier to compute ~VAL~
+   $\times$ ~N~, stores it in ~VAL~, and jumps to the restored ~continue~
+   address.
+
+** Hardware Architecture Insight
+
+For someone writing C code for embedded Linux processors, this
+explicit sequence of saving and restoring is exactly what the C
+compiler generates in the assembly preamble and epilogue of a
+function. Before a ~Branch with Link~ (BL) instruction in an ARM or
+RISC-V core, the processor pushes local variables and the Link
+Register (LR) to the Stack Pointer (SP). When the function returns, it
+pops them back. The Lisp register machine is a generalized, abstract
+model of this exact physical process.
+
+* Elisp Demonstration: Explicit Stack Factorial
+
+While we usually write factorial recursively in Lisp, we can simulate
+the physical register machine's behavior by using an explicit stack
+list and a program counter (~state~). This loop accurately mirrors the
+finite state machine of the hardware controller.
+
+#+BEGIN_SRC elisp
+  (defun simulate-fact-machine (n-init)
+    "Simulates the hardware state machine for Factorial using a stack."
+    (let ((reg-N n-init)
+          (reg-VAL 1)
+          (reg-continue 'halt)
+          (stack nil)
+          (state 'fact-loop)) ;; Our Program Counter
+
+      (catch 'machine-halt
+        (while t
+          (cond
+           ;; State 1: The start of the factorial loop
+           ((eq state 'fact-loop)
+            (if (= reg-N 1)
+                (progn
+                  (setq reg-VAL 1)
+                  (setq state reg-continue)) ;; Base case: Jump to continue
+              (progn
+                ;; Save current state to the stack
+                (push reg-continue stack)
+                (push reg-N stack)
+                ;; Set up registers for the recursive call
+                (setq reg-continue 'after-fact)
+                (setq reg-N (1- reg-N))
+                (setq state 'fact-loop)))) ;; Jump to start
+
+           ;; State 2: Returning from the nested call
+           ((eq state 'after-fact)
+            ;; Restore state (LIFO order: pop N first, then continue)
+            (setq reg-N (pop stack))
+            (setq reg-continue (pop stack))
+            ;; Perform the deferred multiplication hardware operation
+            (setq reg-VAL (* reg-VAL reg-N))
+            ;; Jump to the caller
+            (setq state reg-continue))
+
+           ;; State 3: Machine is finished
+           ((eq state 'halt)
+            (throw 'machine-halt reg-VAL)))))))
+
+  (princ (format "Hardware Machine Output for 5!: %s\n" (simulate-fact-machine 5)))
+#+END_SRC
+
+* The Fibonacci Machine
+
+In this final segment, Professor Sussman demonstrates how to implement
+a machine that processes *double recursion* using the Fibonacci
+sequence as a case study.
+
+He defines the mathematical procedure as:
+- If $N < 2$, the result is $N$.
+- Otherwise, it is the sum of $Fib(N-1)$ and
+  $Fib(N-2)$.
+
+* Double Recursion and Stack Complexity
+
+The Fibonacci machine uses the same registers we are now familiar
+with: ~N~, ~VAL~ (for the answer), and ~continue~. Sussman explicitly skips
+drawing the physical datapath because it is nearly identical to
+previous examples.
+
+Because the algorithm calls itself twice per step, the controller's
+logic must heavily utilize the stack to avoid clobbering its state:
+
+1. *First Branch ($N-1$):* The machine must save the initial ~continue~
+   address and the original ~N~ to the stack, decrement ~N~, and run the
+   Fibonacci subroutine.
+2. *Intermediate State:* When the first branch returns, the answer is
+   in ~VAL~. But to compute the second branch, the machine must save
+   this intermediate ~VAL~ to the stack so it isn't overwritten.
+3. *Second Branch ($N-2$):* The machine restores ~N~, subtracts 2, saves
+   the new ~continue~ address, and runs the subroutine again.
+4. *Final Computation:* It restores the first ~VAL~ from the stack, adds
+   it to the newly computed ~VAL~, and jumps to the original ~continue~
+   address.
+
+* The Jump to a Universal Machine
+
+Sussman highlights a profound realization about computation: once you
+assemble enough basic features—registers, basic arithmetic operations,
+and a stack—you suddenly have everything needed to create a *Universal
+Computer*.
+
+He notes that "it's remarkable that it just gets there so fast". The
+hardware elements used for the Fibonacci machine are essentially all
+that is required to build a physical chip capable of running the
+entire Lisp Evaluator (~EVAL~ and ~APPLY~).
+
+When you design hardware platforms for Embedded Linux Processors, you
+are leveraging this exact universality. Whether a processor is
+executing a simple arithmetic loop or booting a full embedded kernel,
+the physical datapath operations (pushing to the stack, moving data
+between registers, ALU operations) remain fundamentally the same. The
+complexity lives entirely in the software instructions that control
+the datapath.
+
+* Elisp Demonstration: Tracing Double Recursion
+
+To see the sheer volume of work the controller must handle during
+double recursion, we can trace a standard Elisp Fibonacci
+function. Notice how many times the function is called, mimicking the
+heavy stack usage (saving and restoring registers) of the hardware
+controller.
+
+#+BEGIN_SRC elisp
+  (defvar fib-call-count 0)
+
+  (defun trace-fib (n)
+    (setq fib-call-count (1+ fib-call-count))
+    (if (< n 2)
+        n
+      (+ (trace-fib (- n 1))
+         (trace-fib (- n 2)))))
+
+  (setq fib-call-count 0)
+  (princ (format "Result of Fib(5): %s\n" (trace-fib 5)))
+  (princ (format "Total Hardware Subroutine Calls: %s\n" fib-call-count))
+#+END_SRC
