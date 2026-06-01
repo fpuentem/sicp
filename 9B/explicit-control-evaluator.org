@@ -1,0 +1,562 @@
+#+TITLE: The Explicit-Control Evaluator
+#+AUTHOR: Fabricio Puente Mansilla
+#+DATE: <2026-05-30 Sat>
+#+OPTIONS: toc:2
+#+PROPERTY: header-args:elisp :results output :exports both
+
+* Overview: The Magic of Building Languages
+Professor Abelson opens the lecture by reflecting on the overarching
+theme of the course: the magic of building new
+languages.
+
+Throughout the course, we have constructed several domain-specific
+languages:
+
+1. *The Escher Picture Language:* A language for geometry, which was
+   actually adapted by an MIT student (Henry Wu) into a real-world
+   tool for laying out Printed Circuit (PC) boards.
+2. *The Logic Query Language:* A declarative language for making
+   deductions.
+3. *The Digital Logic Language:* Used for simulating electronic
+   circuits.
+
+Even though we implemented these as "toy examples," Abelson emphasizes
+that they are the true kernels of highly useful, professional
+systems.
+
+* The Goal: Stripping Away the "Magic" of Lisp
+All of these domain-specific languages were built on top of
+Lisp. Furthermore, in Lecture 7, we built a Lisp Evaluator (the
+Metacircular Evaluator) that was *also* built on top of Lisp.
+
+The problem with the Metacircular Evaluator is that it hides the
+physical reality of computation. When it needs to evaluate a recursive
+function, it simply relies on the underlying Lisp interpreter's
+ability to handle recursion.
+
+*The Explicit-Control Evaluator* is our final descent into the
+machine. We are going to implement the Lisp ~EVAL~ and ~APPLY~ cycle
+directly in the *Register Machine Language* we designed in Lecture
+9A. By doing this, we explicitly define every single stack push, pop,
+and memory movement required to run Lisp, leaving absolutely nothing
+to "magic."
+
+* Architecture of the Lisp Register Machine
+To build a machine that evaluates Lisp expressions, we need to define
+its Data Paths (its physical storage). A standard CPU doesn't know
+what a "Lisp Environment" is, so we dedicate specific registers to
+hold the state of our evaluator.
+
+** The 7 Essential Evaluator Registers
+To evaluate Lisp natively in hardware, the machine needs exactly seven
+registers:
+1. ~EXP~: Holds the expression currently being evaluated.
+2. ~ENV~: Holds the current environment (the dictionary of variable
+   bindings).
+3. ~VAL~: Holds the result of the evaluation (this is where ~EVAL~ puts
+   its output).
+4. ~FUN~: Holds the procedure (function) that is about to be applied.
+5. ~ARG~: Holds the evaluated arguments that will be passed to the
+   procedure.
+6. ~UNEV~: Holds a list of sub-expressions that have not yet been
+   evaluated (temporary storage during combinations).
+7. ~CONTINUE~: The return address. Tells the machine where to jump after
+   an evaluation finishes.
+
+* Elisp Demonstration: Abstracting the Machine State
+While we cannot physically wire a CPU in Emacs, we can visualize the
+register state of our evaluator as a simple association list (a hash
+table/struct equivalent).
+
+#+BEGIN_SRC elisp
+  ;; A structural representation of the Evaluator Machine's Registers
+  (defvar evaluator-machine
+    '((EXP . nil)
+      (ENV . global-env)
+      (VAL . nil)
+      (FUN . nil)
+      (ARG . nil)
+      (UNEV . nil)
+      (CONTINUE . halt)))
+
+  (defun set-register (reg value)
+    "Updates the hardware register."
+    (setf (cdr (assoc reg evaluator-machine)) value))
+
+  (defun get-register (reg)
+    "Reads the hardware register."
+    (cdr (assoc reg evaluator-machine)))
+
+  ;; Simulating the setup for evaluating (+ 2 3)
+  (set-register 'EXP '(+ 2 3))
+  (set-register 'ENV 'local-env)
+  (set-register 'CONTINUE 'print-result)
+
+  (princ (format "Machine State Loaded.\nExpression to compute: %s\nReturn Address: %s\n"
+                 (get-register 'EXP)
+                 (get-register 'CONTINUE)))
+#+END_SRC
+
+#+RESULTS:
+: Machine State Loaded.
+: Expression to compute: (+ 2 3)
+: Return Address: print-result
+
+* The Heart of the Machine
+In the metacircular evaluator, we used a giant ~cond~ statement to
+figure out what kind of expression we were dealing with. In our
+hardware register machine, this central routing hub is a controller
+label called ~eval-dispatch~.
+
+The ~eval-dispatch~ label acts as a traffic cop. It looks at the
+contents of the ~EXP~ register and uses hardware test buttons to figure
+out where to send the flow of execution.
+
+* The eval-dispatch Router
+When the machine jumps to ~eval-dispatch~, it checks the type of the
+expression sequentially:
+- Is it a self-evaluating number? $\rightarrow$ Jump to ~ev-self-eval~
+- Is it a variable? $\rightarrow$ Jump to ~ev-variable~
+- Is it a conditional (~if~)? $\rightarrow$ Jump to
+  ~ev-conditional~.
+- Is it an application (function call)? $\rightarrow$ Jump to
+  ~ev-application~
+
+Each of these target labels contains the specific micro-instructions
+(register assignments and memory operations) to handle that specific
+data type.
+
+* The Challenge of Applications
+The most complex operation is evaluating an application (a combination
+like ~(+ (* 2 3) 4)~).
+
+When ~eval-dispatch~ routes to ~ev-application~, the machine must do three
+things:
+1. Evaluate the operator (the function).
+2. Evaluate the operands (the arguments).
+3. Apply the evaluated operator to the evaluated operands.
+
+To evaluate the operator, the machine must extract the operator from
+the expression, place it into the ~EXP~ register, and jump *back* to
+~eval-dispatch~.
+
+* The Contract of xeval-dispatch and The Stack
+Here, Professor Abelson introduces a crucial engineering rule for the
+machine: ~eval-dispatch~ makes no promises about what registers it
+may destroy.
+
+Because evaluating the operator might require arbitrarily complex
+sub-evaluations, the ~eval-dispatch~ process might clobber the ~ENV~, ~EXP~,
+and ~VAL~ registers.
+
+But wait! After the operator is evaluated, we still need to evaluate
+the operands (which are sitting in the ~UNEV~ register) in the current
+environment (sitting in the ~ENV~ register). If ~eval-dispatch~ destroys
+them, the machine will crash.
+
+** The Solution: Defensive Saving
+To solve this, we must protect our data using the hardware stack
+*before* we hand control over to ~eval-dispatch~.
+
+Before evaluating the operator, the machine must:
+1. Save the ~UNEV~ register (the operands we need later) onto the
+   stack.
+2. Save the ~ENV~ register (the environment we need to evaluate those
+   operands) onto the stack.
+3. Save the ~CONTINUE~ register (the address we want ~eval-dispatch~ to
+   return to when it finishes finding the operator) onto the
+   stack.
+
+When ~eval-dispatch~ finishes, it jumps back to our continuation
+label. The first thing we do is ~restore~ those exact registers from the
+stack, allowing us to safely proceed to evaluating the operands.
+
+* Elisp Demonstration: Simulating the Dispatch Router
+We can simulate the concept of the hardware dispatcher and its
+destructive nature using Elisp.
+
+#+BEGIN_SRC elisp
+  (defvar reg-EXP nil)
+  (defvar reg-ENV 'global)
+  (defvar reg-UNEV '(2 3))
+  (defvar stack nil)
+
+  (defun sim-eval-dispatch ()
+    "Simulates the evaluator, which destroys registers!"
+    (princ (format "  [eval-dispatch] Evaluating %s...\n" reg-EXP))
+    ;; Simulating the destruction of registers during deep evaluation
+    (setq reg-ENV 'clobbered-env)
+    (setq reg-UNEV 'clobbered-unev)
+    'operator-found)
+
+  (defun sim-ev-application ()
+    "Simulates setting up an application evaluation."
+    (princ "Setting up operator evaluation...\n")
+
+    ;; 1. Save state defensively before calling eval-dispatch
+    (push reg-ENV stack)
+    (push reg-UNEV stack)
+    (princ "  Registers SAVED to stack.\n")
+
+    ;; 2. Set up the operator in EXP
+    (setq reg-EXP '+)
+
+    ;; 3. Call the destructive eval-dispatch
+    (sim-eval-dispatch)
+
+    ;; 4. Restore state
+    (setq reg-UNEV (pop stack))
+    (setq reg-ENV (pop stack))
+    (princ "  Registers RESTORED from stack.\n")
+
+    (princ (format "Ready to evaluate operands: %s in %s\n" reg-UNEV reg-ENV)))
+
+  (sim-ev-application)
+#+END_SRC
+
+#+RESULTS:
+: Ready to evaluate operands: (2 3) in global
+
+* The eval-args Loop
+In the previous section, the machine evaluated the operator of a
+combination and safely restored its registers. Now, the machine must
+evaluate the operands (the arguments).
+
+At this exact moment in the hardware:
+- The evaluated operator is sitting safely in the ~FUN~ register.
+- The unevaluated operands are in the ~UNEV~ register.
+- The current environment is in the ~ENV~ register.
+- We need a new register, ~ARG~, to accumulate the evaluated arguments.
+
+** The Argument Evaluation Cycle
+The machine enters a loop called ~eval-args~. For each operand in ~UNEV~:
+1. It pulls the first expression out of ~UNEV~ and puts it into ~EXP~.
+2. It must evaluate this expression by calling ~eval-dispatch~.
+
+*CRITICAL HARDWARE PROBLEM:* Evaluating an argument can be an
+arbitrarily complex process that destroys all registers. For example,
+in ~(+ (* 2 3) (- 4 1))~, evaluating the first argument ~(* 2 3)~ requires
+a full recursive trip through the evaluator.
+
+To survive this, the machine must rigorously protect its state. Before
+calling ~eval-dispatch~ for each argument, it pushes ~ENV~, ~UNEV~, and the
+accumulated ~ARG~ list onto the stack. After ~eval-dispatch~ returns the
+result in ~VAL~, the machine pops ~ARG~, ~UNEV~, and ~ENV~, appends the new
+~VAL~ to ~ARG~, and loops until ~UNEV~ is empty.
+
+* The Transition: apply-dispatch
+Once ~UNEV~ is empty, the setup phase is complete. The machine has the
+operator in ~FUN~ and the fully evaluated arguments in ~ARG~. It is
+finally ready to perform the actual computation.
+
+It jumps to a major router label: ~apply-dispatch~. This is the hardware
+equivalent of the ~APPLY~ procedure from the metacircular evaluator.
+
+** Applying Primitive Procedures
+If the ~FUN~ register contains a primitive procedure (like ~+~ or ~*~):
+- The machine drops down below the Lisp abstraction. It triggers a
+  physical ALU operation (or a base-level machine code routine).
+- It takes the inputs from ~ARG~, computes the result, and stores it in
+  ~VAL~.
+- It then jumps to the address stored in the ~CONTINUE~ register,
+  effectively returning to whoever called it.
+
+** Applying Compound Procedures
+If the ~FUN~ register contains a compound procedure (a user-defined
+~lambda~), the machine cannot just trigger an ALU operation. It must
+execute the Lisp code inside the procedure body.
+
+To do this, it performs the exact mechanical steps of the Environment
+Model:
+1. *Extract Data:* It looks at the ~FUN~ register and extracts the
+   procedure's formal parameters, its body, and the environment it was
+   defined in (the captured environment).
+2. *Build the Frame:* It creates a new environment frame by binding
+   the formal parameters to the actual values currently sitting in
+   ~ARG~.
+3. *Link the Environment:* It attaches this new frame to the captured
+   environment. This newly extended environment is placed into the ~ENV~
+   register.
+4. *Set up the Body:* It takes the procedure's body and places it into
+   the ~EXP~ register.
+5. *Jump:* It jumps back to ~eval-dispatch~ to evaluate the body in this
+   brand new environment.
+
+* The Mental Model: C Stack Frames vs. Lisp Environments
+When compiling C code, setting up a function call involves pushing
+arguments onto the physical memory stack and moving the instruction
+pointer to the function's memory address. The local variables exist
+directly on that physical stack.
+
+In the Lisp Register Machine, the physical hardware stack is used *only*
+for saving registers during the evaluation phase (~eval-args~). When it
+is time to actually apply a compound procedure, the machine
+dynamically allocates a new data structure (the environment frame) in
+heap memory and points the ~ENV~ register to it. It then routes the ~EXP~
+register to the function's body. This separation between the *control
+stack* (return addresses and temporary register backups) and the
+*environment* (lexical variable scope) is what gives Lisp its unique
+power to handle closures and first-class functions natively.
+
+* Elisp Demonstration: Simulating apply-dispatch
+We can simulate the hardware branching of ~apply-dispatch~ to see how
+the machine mutates its registers when transitioning into a compound
+procedure.
+
+#+BEGIN_SRC elisp
+  ;; Simulated hardware registers
+  (defvar reg-FUN nil)
+  (defvar reg-ARG nil)
+  (defvar reg-ENV 'global)
+  (defvar reg-EXP nil)
+
+  (defun sim-apply-dispatch ()
+    "Simulates the hardware router for applying procedures."
+    (princ (format "Entering apply-dispatch with FUN: %s\n" reg-FUN))
+
+    (cond
+     ;; 1. Primitive Procedure
+     ((eq (car reg-FUN) 'primitive)
+      (princ "  Detected Primitive. Executing ALU operation...\n")
+      (setq reg-VAL (apply (cdr reg-FUN) reg-ARG))
+      (princ (format "  Result stored in VAL: %s\n" reg-VAL)))
+
+     ;; 2. Compound Procedure
+     ((eq (car reg-FUN) 'procedure)
+      (princ "  Detected Compound Procedure. Setting up new environment...\n")
+      (let ((params (nth 1 reg-FUN))
+            (body (nth 2 reg-FUN))
+            (captured-env (nth 3 reg-FUN)))
+        ;; Build new frame and extend environment
+        (setq reg-ENV (cons (cl-pairlis params reg-ARG) captured-env))
+        ;; Set expression to the procedure body
+        (setq reg-EXP body)
+        (princ (format "  Jumping to eval-dispatch with EXP: %s\n" reg-EXP))
+        (princ (format "  Current ENV: %s\n" reg-ENV))))))
+
+  ;; Test 1: Primitive Apply
+  (setq reg-FUN '(primitive . +))
+  (setq reg-ARG '(10 20))
+  (sim-apply-dispatch)
+
+  (princ "\n-----------------------------------\n\n")
+
+  ;; Test 2: Compound Apply
+  (setq reg-FUN '(procedure (x y) (+ x y) global))
+  (setq reg-ARG '(5 7))
+  (sim-apply-dispatch)
+#+END_SRC
+
+* The Final Piece of the Evaluator
+We are now entering the most critical mechanism of the
+Explicit-Control Evaluator. So far, our hardware machine can evaluate
+primitives and apply compound procedures. But what happens when a
+procedure has multiple expressions in its body?
+
+In this segment, Professor Abelson dissects how the machine evaluates
+a sequence of expressions (~ev-sequence~). More importantly, he reveals
+how a simple hardware optimization in this sequence evaluator is the
+sole mechanism responsible for *Proper Tail Recursion*.
+
+* Evaluating a Sequence (ev-sequence)
+When a procedure body contains multiple expressions (e.g., inside a
+~lambda~, a ~cond~ clause, or a ~begin~ block), the machine must evaluate
+them one by one.
+
+If the sequence is ~(exp1 exp2 exp3)~:
+1. Evaluate ~exp1~. The result is placed in ~VAL~.
+2. Discard the result in ~VAL~.
+3. Evaluate ~exp2~. The result is placed in ~VAL~.
+4. Discard the result.
+5. Evaluate ~exp3~, and *keep* its result as the final answer.
+
+** The Naive Hardware Implementation
+To evaluate ~exp1~, the machine sets up the ~EXP~ register and calls
+~eval-dispatch~. Because there are more expressions to evaluate later
+(~exp2~ and ~exp3~), the machine must save its state (the ~ENV~, the
+remaining sequence, and the ~CONTINUE~ register) onto the stack.
+
+When ~exp1~ is done, ~eval-dispatch~ returns to the sequence
+evaluator. The machine pops its state, throws away ~VAL~, and prepares
+for ~exp2~.
+
+If we apply this logic to the *final* expression (~exp3~), the machine
+would push its state, call ~eval-dispatch~, wait for it to return to the
+sequence evaluator, pop its state, and *then* immediately jump to the
+original ~CONTINUE~ register.
+
+* The Secret of Tail Call Optimization (TCO)
+Professor Abelson points out that saving state for the *final*
+expression in a sequence is a waste of hardware resources.
+
+When evaluating the last expression (~exp3~), there is absolutely no
+more work left to do in the sequence. There is no reason for
+~eval-dispatch~ to return to ~ev-sequence~.
+
+** The Optimized Hardware Flow
+Instead of pushing state to the stack for the final expression, the
+SICP evaluator does this:
+1. It restores the original ~CONTINUE~ register from the stack (the
+   address of whoever called the procedure in the first place).
+2. It places the final expression in ~EXP~.
+3. It executes a direct jump (~goto~) to ~eval-dispatch~.
+
+Because the original ~CONTINUE~ register was restored *before* the jump,
+~eval-dispatch~ will evaluate the final expression and return the answer
+directly to the original caller. The ~ev-sequence~ intermediary is
+completely bypassed.
+
+* Hardware Context: Stacks and Jump Instructions
+When analyzing the execution of a standard recursive C program using
+GDB, you can watch the call stack grow linearly, pushing a new frame
+for every function call. If a C function ends with `return
+fact_iter(...)`, the compiler generates a `CALL` instruction, pushing
+the return address to the stack.
+
+The Lisp machine avoids this stack growth entirely. By executing a
+direct jump to ~eval-dispatch~ while holding the original continuation,
+it performs the hardware equivalent of a RISC-V ~J~ (Jump) instruction
+instead of a ~JAL~ (Jump and Link). The stack depth remains
+constant. The machine reuses the current memory frame, executing an
+iterative process in $O(1)$ space.
+
+* Elisp Demonstration: Tracing the Sequence Evaluator
+We can simulate this crucial difference in Elisp. Notice how the
+optimized version does not push a continuation to the stack for the
+final item.
+
+#+BEGIN_SRC elisp
+  (defvar sim-stack nil)
+  (defvar reg-CONTINUE 'caller-address)
+
+  (defun sim-eval-dispatch (exp)
+    (princ (format "  Evaluating: %s (Will return to: %s)\n" exp reg-CONTINUE)))
+
+  (defun sim-ev-sequence-naive (seq)
+    "A naive evaluator that saves state even for the last expression."
+    (princ "Running Naive Sequence:\n")
+    (dolist (exp seq)
+      ;; Push continuation for EVERY expression
+      (push reg-CONTINUE sim-stack)
+      (setq reg-CONTINUE 'return-to-sequence)
+      (sim-eval-dispatch exp)
+      ;; Pop continuation
+      (setq reg-CONTINUE (pop sim-stack))))
+
+  (defun sim-ev-sequence-optimized (seq)
+    "The SICP Evaluator: Bypasses the sequence loop for the last expression."
+    (princ "\nRunning Optimized (Tail-Recursive) Sequence:\n")
+    (let ((exps seq))
+      (while (cdr exps)
+        ;; For all but the last, save continuation
+        (push reg-CONTINUE sim-stack)
+        (setq reg-CONTINUE 'return-to-sequence)
+        (sim-eval-dispatch (car exps))
+        (setq reg-CONTINUE (pop sim-stack))
+        (setq exps (cdr exps)))
+
+      ;; FOR THE LAST EXPRESSION: No stack push!
+      ;; We keep the original reg-CONTINUE and jump directly.
+      (princ "  [TAIL CALL DETECTED! No stack push.]\n")
+      (sim-eval-dispatch (car exps))))
+
+  (sim-ev-sequence-naive '(exp1 exp2 exp3))
+  (sim-ev-sequence-optimized '(exp1 exp2 exp3))
+#+END_SRC
+
+* The Consequence of Bypassing the Stack
+In the previous segment, we saw that the Explicit-Control Evaluator
+executes the final expression in a sequence without pushing a new
+~CONTINUE~ register to the hardware stack. Instead, it restores the
+original caller's ~CONTINUE~ address and jumps directly to
+~eval-dispatch~.
+
+In this final segment, Professor Abelson traces the execution of an
+iterative algorithm to prove that this single hardware optimization
+fundamentally changes the space complexity of the machine.
+
+* Tracing an Iterative Procedure
+Let's look at the standard iterative factorial algorithm written recursively:
+
+#+BEGIN_SRC elisp :results silent
+(defun fact-iter (product counter max-count)
+  (if (> counter max-count)
+      product
+    (fact-iter (* counter product)
+               (+ counter 1)
+               max-count)))
+#+END_SRC
+
+To the Lisp evaluator, the ~if~ statement is essentially a sequence. The
+recursive call to ~(fact-iter ...)~ is the final expression evaluated in
+the "false" branch of that sequence.
+
+** The Hardware Flow
+1. The machine evaluates the predicate ~(> counter max-count)~.
+2. It proceeds to the alternative branch, which is the call to ~fact-iter~.
+3. Because this is the *final expression* to be evaluated in this
+   context, the machine *does not save its state on the stack*.
+4. It sets up the new arguments in the ~ARG~ register.
+5. It replaces the old ~ENV~ with the new ~ENV~ for the next iteration.
+6. It jumps back to ~apply-dispatch~.
+
+* The Illusion of Recursion
+Look closely at what just happened in the hardware. The machine
+overwrote its current registers with new values and jumped back to the
+top of the function. *The stack did not grow.* Even though the code is
+written as a recursive function, the Explicit-Control Evaluator
+executes it as a pure `goto` loop. The state of the process is fully
+captured in the variables (`product`, `counter`, `max-count`), and the
+machine runs in $O(1)$ constant space.
+
+This is what makes Lisp (specifically Scheme) fundamentally different
+from most other languages. Abelson states that Tail Recursion is not a
+special feature or a compiler "trick"—it is simply the natural result
+of designing a machine that doesn't save information it no longer
+needs.
+
+* The Explicit-Control Evaluator: Final Summary
+By building this machine, we have stripped away all the "magic" of Lisp. We have seen that:
+1. *Recursion* is just saving the ~CONTINUE~ register and local
+   variables to a physical stack.
+2. *Environmentsg* are just linked lists of variable bindings sitting
+   in memory, pointed to by the ~ENV~ register.
+3. *Closures* are just packaging a procedure body with a snapshot of
+   the ~ENV~ register.
+4. *Tail Recursion* is just executing a Jump (`J`) instead of a
+   Jump-and-Link (`JAL`) for the last expression.
+
+* Engineering Insight: The Reality of Silicon
+When designing custom hardware or working on low-level system
+architectures for Embedded Linux Processors, understanding this
+evaluator is incredibly powerful. The Lisp machine we just modeled is
+not an abstract concept; it is a blueprint for actual physical
+silicon. You can take the Register Machine Language equations from
+this lecture, translate them directly into Verilog or VHDL, and flash
+them onto an FPGA. The result would be a physical CPU that executes
+recursive Lisp code natively, without any operating system or software
+interpreter acting as a middleman.
+
+* Elisp Demonstration: The Difference TCO Makes
+Because standard Emacs Lisp lacks automatic TCO (unlike the Scheme
+dialect used in SICP), deeply recursive functions will crash the
+interpreter. However, we can use the ~named-let~ macro, which instructs
+the Elisp byte-compiler to perform the exact sequence optimization
+Abelson described—rewriting our tail calls into hardware-level jumps.
+
+#+BEGIN_SRC elisp
+  ;; Enable lexical binding for the compiler optimization to work
+  ;; -*- lexical-binding: t; -*-
+  (require 'subr-x)
+
+  ;; Attempting an iterative loop 10,000 times
+  (defun optimized-loop (n)
+    (named-let iter-loop ((count n))
+      (if (= count 0)
+          "Finished successfully!"
+        ;; Because this is the LAST expression, named-let compiles
+        ;; it as a GOTO, avoiding a stack overflow.
+        (iter-loop (- count 1)))))
+
+  (princ (format "Result: %s\n" (optimized-loop 10000)))
+#+END_SRC
