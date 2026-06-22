@@ -6,8 +6,7 @@
 
 * Overview: The Magic of Building Languages
 Professor Abelson opens the lecture by reflecting on the overarching
-theme of the course: the magic of building new
-languages.
+theme of the course: the magic of building new languages.
 
 Throughout the course, we have constructed several domain-specific
 languages:
@@ -21,8 +20,7 @@ languages:
    circuits.
 
 Even though we implemented these as "toy examples," Abelson emphasizes
-that they are the true kernels of highly useful, professional
-systems.
+that they are the true kernels of highly useful, professional systems.
 
 * The Goal: Stripping Away the "Magic" of Lisp
 All of these domain-specific languages were built on top of
@@ -117,8 +115,7 @@ When the machine jumps to ~eval-dispatch~, it checks the type of the
 expression sequentially:
 - Is it a self-evaluating number? $\rightarrow$ Jump to ~ev-self-eval~
 - Is it a variable? $\rightarrow$ Jump to ~ev-variable~
-- Is it a conditional (~if~)? $\rightarrow$ Jump to
-  ~ev-conditional~.
+- Is it a conditional (~if~)? $\rightarrow$ Jump to ~ev-conditional~.
 - Is it an application (function call)? $\rightarrow$ Jump to
   ~ev-application~
 
@@ -493,7 +490,8 @@ the "false" branch of that sequence.
 
 ** The Hardware Flow
 1. The machine evaluates the predicate ~(> counter max-count)~.
-2. It proceeds to the alternative branch, which is the call to ~fact-iter~.
+2. It proceeds to the alternative branch, which is the call to
+   ~fact-iter~.
 3. Because this is the *final expression* to be evaluated in this
    context, the machine *does not save its state on the stack*.
 4. It sets up the new arguments in the ~ARG~ register.
@@ -505,8 +503,8 @@ Look closely at what just happened in the hardware. The machine
 overwrote its current registers with new values and jumped back to the
 top of the function. *The stack did not grow.* Even though the code is
 written as a recursive function, the Explicit-Control Evaluator
-executes it as a pure `goto` loop. The state of the process is fully
-captured in the variables (`product`, `counter`, `max-count`), and the
+executes it as a pure ~goto~ loop. The state of the process is fully
+captured in the variables (~product~, ~counter~, ~max-count~), and the
 machine runs in $O(1)$ constant space.
 
 This is what makes Lisp (specifically Scheme) fundamentally different
@@ -516,15 +514,16 @@ of designing a machine that doesn't save information it no longer
 needs.
 
 * The Explicit-Control Evaluator: Final Summary
-By building this machine, we have stripped away all the "magic" of Lisp. We have seen that:
-1. *Recursion* is just saving the ~CONTINUE~ register and local
-   variables to a physical stack.
-2. *Environmentsg* are just linked lists of variable bindings sitting
-   in memory, pointed to by the ~ENV~ register.
-3. *Closures* are just packaging a procedure body with a snapshot of
-   the ~ENV~ register.
-4. *Tail Recursion* is just executing a Jump (`J`) instead of a
-   Jump-and-Link (`JAL`) for the last expression.
+By building this machine, we have stripped away all the "magic" of
+Lisp. We have seen that:
+1. *Recursion* is just saving the ~CONTINUE~ register and local variables
+   to a physical stack.
+2. *Environmentsg* are just linked lists of variable bindings sitting in
+   memory, pointed to by the ~ENV~ register.
+3. *Closures* are just packaging a procedure body with a snapshot of the
+   ~ENV~ register.
+4. *Tail Recursion* is just executing a Jump (~J~) instead of a
+   Jump-and-Link (~JAL~) for the last expression.
 
 * Engineering Insight: The Reality of Silicon
 When designing custom hardware or working on low-level system
