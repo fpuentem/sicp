@@ -1,0 +1,181 @@
+﻿
+#+TITLE: Lecture 10A: Compilation
+#+AUTHOR: Fabricio Puente-Mansilla
+#+OPTIONS: toc:2
+
+* The Big Picture: Universal Machines and Native Languages
+
+In Lectures 9A and 9B (SICP Section 5.4), we built the
+Explicit-Control Evaluator. This was a Register Machine (a simulated
+CPU) whose internal wiring was designed specifically to interpret
+Scheme programs.  The book notes a profound theoretical point: this
+Evaluator's data paths are universal. Given the right controller,
+those registers and ALUs can perform any computation. Commercial
+general-purpose computers operate the exact same way. They have a
+universal set of data paths, and their controller interprets a native
+language (Machine Language or Assembly).  Until now, our Scheme
+programs were interpreted. Now, we are going to build a Compiler: a
+program that translates Scheme source code directly into the native
+Machine Language of our Register Machine.
+
+* Interpreter vs. Compiler: The Core Difference
+
+When you feed an expression like (+ 2 3) into the Evaluator, it has to
+dynamically decode the program:
+
+1. Look at the expression and parse its type.
+2. Figure out it is a combination (a function call).
+3. Look up + in the environment linked-list.
+4. Discover it is a primitive operation.
+5. Finally, do the math.
+
+The Problem: If you run a while loop 10,000 times, the Evaluator
+executes steps 1-4 10,000 times. It is constantly figuring out how to
+run the code, rather than just running it.
+
+The book defines the difference elegantly:
+- An Evaluator determines the actions to be taken and executes them on
+  the fly.
+- A Compiler determines the actions to be taken once, and instead of
+  executing them, it records them into a sequence of instructions.
+
+* The Massive Optimizations of Compilation
+
+Why go through the trouble of compiling? Aside from removing the
+parsing overhead, the compiler can perform static analysis. Because it
+can "see the future" (the entire structure of the code before it
+runs), it can optimize hardware utilization in ways an interpreter
+cannot.
+
+1. Eliminating Redundant Stack Operations (The f Example)
+In the Explicit-Control Evaluator, the machine is paranoid. When
+evaluating a combination, it aggressively saves registers to the
+hardware stack just in case they get destroyed.  Consider evaluating
+the operator f in the expression (f 84).
+
+- The Evaluator's Naive Approach: The evaluator doesn't know what f is
+  yet. It defensively pushes the ENV (Environment) and UNEV
+  (Unevaluated arguments) registers to the stack, jumps to
+  eval-dispatch to look up f, puts the result in the VAL register,
+  pops the stack, and then moves the result from VAL into the PROC
+  register.
+- The Compiler's Optimized Approach: The compiler looks at f and says,
+  "This is just a symbol lookup. I know for a fact that the
+  lookup-variable-value operation does not destroy the ENV or UNEV
+  registers."
+
+Therefore, the compiler completely skips generating the stack save and
+restore instructions. Furthermore, instead of routing the answer
+through VAL, it generates a single, highly efficient machine
+instruction: (assign proc (op lookup-variable-value) (const f) (reg
+env))
+
+Analogy: In C (like GCC), if a function is marked with
+__attribute__((pure)) or the compiler can prove it doesn't touch
+global state, it will optimize away the costly stack frame allocations
+(pushing and popping registers) before calling it.
+
+2. Lexical Addressing (The Death of Variable Lookup)
+In an Interpreter, looking up a variable like x means traversing a
+linked list (the Environment) at runtime and doing string comparisons:
+"Is this 'x'? No. Next frame. Is this 'x'? Yes."  The Compiler knows
+the exact lexical layout of the code before it runs. It knows that x
+will always be, for example, the 2nd variable in the 1st environment
+frame above it. Instead of compiling a "lookup by string name"
+instruction, the compiler generates a hardcoded memory offset: "Fetch
+Frame 1, Offset 2".
+
+Analogy: This is exactly what the C compiler
+does. Variable names like int counter disappear entirely in compiled C
+code. They are replaced by raw stack pointer offsets (e.g., LDR R0,
+[SP, #8]). The SICP compiler achieves this same bare-metal speed for
+Lisp environments!
+
+* Structure of the Compiler (Section 5.5.1)
+
+How is this compiler actually built? The architecture strongly mirrors
+the Metacircular Evaluator we built in Chapter 4, specifically Section
+4.1.7, which separated the syntax analysis from the actual execution.
+
+1. The Top-Level Dispatch (compile)
+The entry point of the compiler is the compile procedure. It acts as a
+massive router (or a hardware multiplexer) that performs a case
+analysis on the expression's syntax type.  However, unlike the eval
+function which only takes the expression and the environment, compile
+takes three arguments:
+ 1. exp: The expression to be compiled.
+ 2. target: The register where the compiled code must place its final result.
+ 3. linkage: Instructions on where the machine should go after this code is executed.
+
+#+BEGIN_SRC scheme :eval never
+  (define (compile exp target linkage)
+    (cond ((self-evaluating? exp)
+           (compile-self-evaluating exp target linkage))
+          ((quoted? exp)
+           (compile-quoted exp target linkage))
+          ((variable? exp)
+           (compile-variable exp target linkage))
+          ;; ... other syntax types ...
+          (else
+           (error "Unknown expression type -- COMPILE" exp))))
+#+END_SRC
+
+2. Targets and Linkages (The Hardware Pipeline Analogy)
+
+In Electrical Engineering terms, passing target and linkage is like
+defining the specific data pipeline and control flow for an operation
+before synthesizing it.
+
+- Target (target): This is the "Write-Back" destination in a CPU
+  pipeline. In ARM or RISC-V assembly, when you issue an instruction
+  like ADD R1, R2, R3, R1 is the target register (rd). By passing
+  target down the compilation tree, we can tell a sub-expression to
+  deposit its answer directly into val, argl, or proc, avoiding
+  unnecessary memory moves later.
+
+- Linkage (linkage): This dictates the Program Counter (PC)
+  update. The compiler supports three types of linkage:
+
+  1. return: Generates a (goto (reg continue)) instruction. (Like a
+     RET instruction in Assembly).
+  2. next: Tells the code to just fall through to the next sequential
+     instruction.
+  3. A specific named label (e.g., (goto (label branch-true))).
+
+3. Instruction Sequences: Dependency Tracking
+
+When the compiler generates a block of machine code, it doesn't just
+output raw text. It wraps the instructions in a sophisticated data
+structure that explicitly tracks its register dependencies.
+
+An instruction sequence is a list of three parts:
+ 1. needs: The set of registers that must have valid data before these
+    instructions run (Inputs).
+ 2. modifies: The set of registers whose values will be overwritten by
+    these instructions (Outputs / Clobbers).
+ 3. statements: The actual machine code instructions.
+
+For example, the text shows how compiling a variable lookup for x
+(with target val and linkage return) generates this sequence:
+
+#+BEGIN_SRC scheme :eval never
+  (make-instruction-sequence
+   '(env continue) ;; NEEDS: env (to look up x), continue (to return)
+   '(val) ;; MODIFIES: val (overwrites it with the answer)
+   '((assign val (op lookup-variable-value) (const x) (reg env))
+     (goto (reg continue))))
+#+END_SRC
+
+*** Why is this brilliant? (Liveness Analysis)
+By explicitly tracking needs and modifies, the compiler performs what
+modern C/C++ compiler engineers call Liveness Analysis or Data-Flow
+Analysis.  When combining two blocks of code (e.g., evaluating an
+argument, then evaluating a function), the compiler compares these
+lists:
+- If Sequence 2 needs the ENV register, and Sequence 1 modifies the
+  ENV register, the compiler knows it must inject stack save and
+  restore instructions around Sequence 1 to protect the data.
+- If Sequence 1 does not modify ENV (like our f example earlier), the
+  compiler safely omits the stack operations. This automated
+  dependency tracking is the exact mechanism that allows the compiler
+  to generate heavily optimized, bare-metal code!
